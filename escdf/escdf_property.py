@@ -50,25 +50,33 @@ class ESCDFProperty:
     RaggedArray
     StringArray
     """
-    
-    __slots__ = ('_name','_datatype','_shape','_data','_ragged','_h5_dataset')
-    
+
+    __slots__ = (
+        "_name",
+        "_datatype",
+        "_shape",
+        "_data",
+        "_ragged",
+        "_h5_dataset",
+        "_backing_state",
+    )
+
     @property
     def name(self):
         return self._name
-    
+
     @property
     def datatype(self):
         return self._datatype
-    
+
     @property
     def shape(self):
         return self._shape
-    
+
     @property
     def ragged(self):
         return self._ragged
-    
+
     @property
     def h5_dataset(self):
         return self._h5_dataset
@@ -76,8 +84,21 @@ class ESCDFProperty:
     @property
     def in_memory(self):
         return self.h5_dataset is None
-    
-    def __init__(self,name,datatype,shape,data = None, ragged=False, hdf5group : h5.Group=None, hdf5dataset : h5.Dataset = None):
+
+    @property
+    def backing_state(self):
+        return self._backing_state
+
+    def __init__(
+        self,
+        name,
+        datatype,
+        shape,
+        data=None,
+        ragged=False,
+        hdf5group: h5.Group = None,
+        hdf5dataset: h5.Dataset = None,
+    ):
         """
         Initialize an ESCDF property.
 
@@ -107,6 +128,7 @@ class ESCDFProperty:
         self._datatype = datatype
         self._shape = tuple(shape)
         self._ragged = ragged
+        self._backing_state = "memory"
         
         # Make sure we don't have inconsistent data
         if datatype == 'str' and ragged:
@@ -117,6 +139,7 @@ class ESCDFProperty:
         if hdf5dataset is not None:
             self._h5_dataset = hdf5dataset
             self._data = None
+            self._backing_state = "hdf5_native"
             if VERBOSE:
                 print('Linked Dataset to disk: {:}'.format(name))
         elif hdf5group is not None:
@@ -128,26 +151,28 @@ class ESCDFProperty:
                 dtype = h5.vlen_dtype(datatype)
             else:
                 dtype = datatype
-            self._h5_dataset = hdf5group.create_dataset(name,shape,dtype)
+            self._h5_dataset = hdf5group.create_dataset(name, shape, dtype)
             self.h5_dataset.attrs['data_type'] = datatype
+            self._backing_state = "hdf5_native"
             if VERBOSE:
                 print('Dataset Created on disk: {:}'.format(name))
             self._data = None
         else:
             self._h5_dataset = None
+            self._backing_state = "memory"
             if self.datatype == 'bytes' or self.ragged:
                 self._data = RaggedArray(self.shape, 'uint8' if self.datatype == 'bytes' else self.datatype)
             elif self.datatype == 'str':
                 self._data = StringArray(self.shape)
             else:
-                self._data = np.ndarray(self.shape,self.datatype)
+                self._data = np.ndarray(self.shape, self.datatype)
             if VERBOSE:
                 print('Dataset Created in Memory: {:}'.format(name))
         
         if data is not None:
             self[...] = data
-        
-    def __getitem__(self,key):
+
+    def __getitem__(self, key):
         """
         Retrieve property data by index or slice.
 
@@ -169,10 +194,10 @@ class ESCDFProperty:
         """
         if not self.in_memory:
             out = self.h5_dataset[key]
-            if self.datatype == 'str':
+            if self.datatype == "str":
                 decoder = np.vectorize(
                     lambda x: x.decode() if isinstance(x, (bytes, np.bytes_)) else x,
-                    otypes=[object]
+                    otypes=[object],
                 )
                 out = decoder(out)
                 if out.shape == ():
@@ -181,7 +206,7 @@ class ESCDFProperty:
         else:
             return self._data[key]
 
-    def __setitem__(self,key,value):
+    def __setitem__(self, key, value):
         """
         Assign property data by index or slice.
 
@@ -192,12 +217,17 @@ class ESCDFProperty:
         value : array-like
             Data to assign.
         """
+        if self._backing_state == "hdf5_external":
+            # TODO: This needs to be smarter when transfering between hdf5_external to hdf5_native
+            # as reading the whole dataset into memory may exhaust RAM with large datasets.
+            self.read_into_memory()
+
         if not self.in_memory:
             self.h5_dataset[key] = value
         else:
             self._data[key] = value
-            
-    def write_to_disk(self,hdf5group: h5.Group):
+
+    def write_to_disk(self, hdf5group: h5.Group):
         """
         Write the property to an HDF5 group.
 
@@ -212,6 +242,8 @@ class ESCDFProperty:
         does not rewrite the data.
         """
         if not self.in_memory:
+            # TODO: This needs to be updated because it could be on disk but on a different
+            # external hdf5 file
             warnings.warn('Call to the write_to_disk method is unnecessary for dataset {:} as the data is already on disk.   Data was not written.'.format(self.name))
         else:
             if self.datatype == 'str':
@@ -232,6 +264,7 @@ class ESCDFProperty:
             else:
                 self._h5_dataset[...] = self._data[...]
             self._data = None
+            self._backing_state = "hdf5_native"
             
     def read_into_memory(self):
         """
@@ -255,7 +288,20 @@ class ESCDFProperty:
         self._h5_dataset = None
         if VERBOSE:
             print('Dataset Created in Memory: {:}'.format(self.name))
-        
+        self._backing_state = "memory"
+
+    def mark_external_backing(self):
+        """
+        Mark the property as externally backed.
+
+        Notes
+        -----
+        This is intended for copied/attached property wrappers that still
+        reference an HDF5 source outside their new native context.
+        """
+        if self._backing_state == "hdf5_native":
+            self._backing_state = "hdf5_external"
+
     def repr(self):
         """
         Return a text representation of the property.
@@ -266,11 +312,13 @@ class ESCDFProperty:
             Human-readable summary including storage mode, name, datatype,
             and shape.
         """
-        return 'ESCDF Property ({:}): {:}, {:}, {:}'.format(
-            'in memory' if self.in_memory else 'on disk',
+        return "ESCDF Property ({:}, {:}): {:}, {:}, {:}".format(
+            "in memory" if self.in_memory else "on disk",
+            self.backing_state,
             self.name,
             self.datatype,
-            self.shape)
+            self.shape,
+        )
     
     def __repr__(self):
         return self.repr()

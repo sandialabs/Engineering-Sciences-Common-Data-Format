@@ -300,6 +300,89 @@ classdef property_test < matlab.unittest.TestCase
             end
             testCase.verifyEqual(prop.isinmemory(),true);
         end
+
+        function test_new_in_memory_property_starts_memory_backed(testCase)
+            prop = escdf_property('p1', 'f8', [3]);
+            testCase.verifyEqual(prop.get_backing_state(), 'memory');
+            testCase.verifyTrue(prop.isinmemory());
+        end
+
+        function test_new_hdf5_property_starts_hdf5_native(testCase)
+            prop = escdf_property('p1', 'f8', [3], 'hdf5groupid', testCase.file_id);
+            testCase.verifyEqual(prop.get_backing_state(), 'hdf5_native');
+            testCase.verifyFalse(prop.isinmemory());
+        end
+
+        function test_loaded_property_starts_hdf5_native(testCase)
+            prop = escdf_property('p1', 'f8', [3], 'hdf5groupid', testCase.file_id);
+            prop(:) = [1.0; 2.0; 3.0];
+
+            loaded = escdf_property.load(prop.get_h5d_id());
+            testCase.verifyEqual(loaded.get_backing_state(), 'hdf5_native');
+            testCase.verifyFalse(loaded.isinmemory());
+        end
+
+        function test_read_into_memory_sets_backing_state_to_memory(testCase)
+            prop = escdf_property('p1', 'f8', [3], 'hdf5groupid', testCase.file_id);
+            prop(:) = [1.0; 2.0; 3.0];
+
+            prop.read_into_memory();
+
+            testCase.verifyEqual(prop.get_backing_state(), 'memory');
+            testCase.verifyTrue(prop.isinmemory());
+            testCase.verifyEqual(prop(:), [1.0; 2.0; 3.0]);
+        end
+
+        function test_mark_external_backing_sets_external_state(testCase)
+            prop = escdf_property('p1', 'f8', [3], 'hdf5groupid', testCase.file_id);
+
+            prop.mark_external_backing();
+
+            testCase.verifyEqual(prop.get_backing_state(), 'hdf5_external');
+            testCase.verifyFalse(prop.isinmemory());
+        end
+
+        function test_assignment_to_external_backed_property_materializes_to_memory(testCase)
+            prop = escdf_property('p1', 'f8', [3], 'hdf5groupid', testCase.file_id);
+            prop(:) = [1.0; 2.0; 3.0];
+
+            prop.mark_external_backing();
+            testCase.verifyEqual(prop.get_backing_state(), 'hdf5_external');
+            testCase.verifyFalse(prop.isinmemory());
+
+            prop(:) = [10.0; 20.0; 30.0];
+
+            testCase.verifyEqual(prop.get_backing_state(), 'memory');
+            testCase.verifyTrue(prop.isinmemory());
+            testCase.verifyEqual(prop(:), [10.0; 20.0; 30.0]);
+        end
+
+        function test_compute_hyperslab_arguments_returns_expected_outputs(testCase)
+        % Verify that compute_hyperslab_arguments returns the expected
+        % start, stride, and count arrays for a representative indexing
+        % operation.
+            prop = escdf_property('p1', 'f8', [10, 20, 30]);
+
+            [start, stride, count] = prop.compute_hyperslab_arguments( ...
+                {2:3:8, ':', [5 10 15 20]});
+
+            testCase.verifyEqual(start, [2, 1, 5]);
+            testCase.verifyEqual(stride, [3, 1, 5]);
+            testCase.verifyEqual(count, [3, 20, 4]);
+        end
+
+        function test_compute_hyperslab_arguments_scalar_like_indexing(testCase)
+        % Verify that scalar properties accept ':' indexing through the
+        % hyperslab helper.
+            prop = escdf_property('p1', 'f8', [5]);
+
+            [start, stride, count] = prop.compute_hyperslab_arguments({':'});
+
+            testCase.verifyEqual(start, 1);
+            testCase.verifyEqual(stride, 1);
+            testCase.verifyEqual(count, 5);
+        end
+
     end
 
 end

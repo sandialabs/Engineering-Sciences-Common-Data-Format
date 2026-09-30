@@ -49,8 +49,11 @@ def test_add_metadata(monkeypatch):
     md = make_minimal_metadata("meta1")
     f.add_metadata(md)
 
+    attached_md = f.metadata["meta1"]
+
     assert f.metadata.names == ["meta1"]
-    assert f.metadata["meta1"] is md
+    assert attached_md is not md
+    assert attached_md == md
 
 
 def test_add_duplicate_metadata_raises(monkeypatch):
@@ -228,3 +231,295 @@ def test_simple_file_roundtrip(tmp_path, monkeypatch):
     assert loaded.activities["act1"].metadata_links == ["meta1"]
     assert loaded.activities["act1"].data_names == ["data1"]
     assert loaded.activities["act1"].activity_date == when
+
+
+def test_new_escdf_container_starts_in_expected_state(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+
+    assert f.lifecycle_state == "draft"
+    assert f.mutability_state == "editable"
+    assert f.backing_state == "memory"
+    assert f.has_pending_changes is False
+    assert f.created_by == "unit_test_user"
+    assert f.created_date.tzinfo is not None
+
+
+def test_mutating_container_sets_pending_changes(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    assert f.has_pending_changes is False
+
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+
+    assert f.has_pending_changes is True
+
+
+def test_write_to_disk_sets_hdf5_native_and_clears_pending_changes(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "state_roundtrip.h5"
+
+    f = escdf.ESCDF()
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+
+    assert f.has_pending_changes is True
+    assert f.backing_state == "memory"
+
+    f.write_to_disk(str(file_path))
+
+    assert f.backing_state == "hdf5_native"
+    assert f.has_pending_changes is False
+
+
+def test_loaded_escdf_container_starts_in_expected_state_readonly(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "loaded_state_readonly.h5"
+
+    f = escdf.ESCDF()
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+    f.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path), readonly=True)
+
+    assert loaded.backing_state == "hdf5_native"
+    assert loaded.lifecycle_state == "draft"
+    assert loaded.mutability_state == "read_only"
+    assert loaded.has_pending_changes is False
+
+
+def test_loaded_escdf_container_starts_in_expected_state_editable(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "loaded_state_editable.h5"
+
+    f = escdf.ESCDF()
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+    f.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path), readonly=False)
+
+    assert loaded.backing_state == "hdf5_native"
+    assert loaded.lifecycle_state == "draft"
+    assert loaded.mutability_state == "editable"
+    assert loaded.has_pending_changes is False
+
+
+def test_set_created_properties_marks_pending_changes(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    assert f.has_pending_changes is False
+
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.set_created_properties("someone_else", when)
+
+    assert f.created_by == "someone_else"
+    assert f.created_date == when
+    assert f.has_pending_changes is True
+
+
+def test_add_metadata_clones_in_memory_dataset_wrapper(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    source_md = make_minimal_metadata("meta1")
+    source_md.test_name = "Original Test Name"
+
+    f = escdf.ESCDF()
+    f.add_metadata(source_md)
+
+    attached_md = f.metadata["meta1"]
+
+    # The attached dataset should be a different wrapper object.
+    assert attached_md is not source_md
+
+    # In-memory properties should remain memory-backed in the clone.
+    assert attached_md.test_name.backing_state == "memory"
+    assert attached_md.program.backing_state == "memory"
+    assert attached_md.hardware_list.backing_state == "memory"
+    assert attached_md.point_of_contact.backing_state == "memory"
+
+    # Values should match.
+    assert attached_md.test_name[...] == "Original Test Name"
+    assert attached_md.program[...] == "program abc"
+
+
+def test_add_metadata_clones_hdf5_native_properties_as_external(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "source_metadata.h5"
+
+    source_file = escdf.ESCDF()
+    source_md = make_minimal_metadata("meta1")
+    source_file.add_metadata(source_md)
+    source_file.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path), readonly=True)
+    loaded_md = loaded.metadata["meta1"]
+
+    # Loaded source should be native HDF5-backed.
+    assert loaded_md.test_name.backing_state == "hdf5_native"
+
+    target = escdf.ESCDF()
+    target.add_metadata(loaded_md)
+
+    attached_md = target.metadata["meta1"]
+
+    # New wrapper object
+    assert attached_md is not loaded_md
+
+    # Copied attached properties should now be externally backed.
+    assert attached_md.test_name.backing_state == "hdf5_external"
+    assert attached_md.program.backing_state == "hdf5_external"
+    assert attached_md.hardware_list.backing_state == "hdf5_external"
+    assert attached_md.point_of_contact.backing_state == "hdf5_external"
+
+    # Values should still read correctly.
+    assert attached_md.test_name[...] == "test program name"
+    assert attached_md.program[...] == "program abc"
+
+
+def test_mutating_external_backed_attached_metadata_materializes_clone_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "source_metadata_for_mutation.h5"
+
+    source_file = escdf.ESCDF()
+    source_md = make_minimal_metadata("meta1")
+    source_file.add_metadata(source_md)
+    source_file.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path), readonly=True)
+    loaded_md = loaded.metadata["meta1"]
+
+    target = escdf.ESCDF()
+    target.add_metadata(loaded_md)
+    attached_md = target.metadata["meta1"]
+
+    # Initially external-backed in the attached clone.
+    assert attached_md.test_name.backing_state == "hdf5_external"
+
+    # Mutating should materialize to memory for the clone.
+    attached_md.test_name = "Modified In Clone"
+
+    assert attached_md.test_name.backing_state == "memory"
+    assert attached_md.test_name[...] == "Modified In Clone"
+
+    # Original loaded dataset should remain unchanged and still native-backed.
+    assert loaded_md.test_name.backing_state == "hdf5_native"
+    assert loaded_md.test_name[...] == "test program name"
+
+
+def test_add_data_to_activity_clones_dataset_wrapper(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    source_data = make_minimal_data("data1")
+    source_data.value = 9.81
+    source_data.unit = "m/s^2"
+    assert source_data.validate()
+
+    f.add_data_to_activity("act1", source_data)
+
+    attached_data = f.activities["act1"]["data1"]
+
+    # Dataset wrapper should be cloned rather than reused directly.
+    assert attached_data is not source_data
+
+    # In-memory property remains memory-backed.
+    assert attached_data.value.backing_state == "memory"
+    assert attached_data.unit.backing_state == "memory"
+
+    assert attached_data.value[...] == np.float64(9.81)
+    assert attached_data.unit[...] == "m/s^2"
+
+
+def test_add_hdf5_native_data_to_activity_creates_external_backed_clone(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "source_activity_data.h5"
+
+    source_file = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    source_file.add_activity("act1", "Activity one", when)
+
+    source_data = make_minimal_data("data1")
+    source_data.value = 9.81
+    source_data.unit = "m/s^2"
+    assert source_data.validate()
+
+    source_file.add_data_to_activity("act1", source_data)
+    source_file.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path), readonly=True)
+    loaded_data = loaded.activities["act1"]["data1"]
+
+    # Loaded source should be native HDF5-backed.
+    assert loaded_data.value.backing_state == "hdf5_native"
+
+    target = escdf.ESCDF()
+    target.add_activity("act2", "Activity two", when)
+    target.add_data_to_activity("act2", loaded_data)
+
+    attached_data = target.activities["act2"]["data1"]
+
+    assert attached_data is not loaded_data
+    assert attached_data.value.backing_state == "hdf5_external"
+    assert attached_data.unit.backing_state == "hdf5_external"
+
+    assert attached_data.value[...] == np.float64(9.81)
+    assert attached_data.unit[...] == "m/s^2"

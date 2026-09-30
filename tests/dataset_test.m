@@ -13,6 +13,7 @@ classdef dataset_test < matlab.unittest.TestCase
         enum_specification_file;
         enum_property_names;
         enum_property_values;
+        table_specification_file;
     end
 
     methods (TestMethodSetup)
@@ -26,6 +27,7 @@ classdef dataset_test < matlab.unittest.TestCase
             testCase.test_specification_file = fullfile(testCase.source_folder,'specifications','unittesting_specification.txt');
             testCase.choice_specification_file = fullfile(testCase.source_folder,'specifications','choicetesting_specification.txt');
             testCase.enum_specification_file = fullfile(testCase.source_folder,'specifications','enumtesting_specification.txt');
+            testCase.table_specification_file = fullfile(testCase.source_folder,'specifications','tabletesting_specification.txt');
             data_type = {...
                 'u1','u2','u4','u8',...
                 'i1','i2','i4','i8',...
@@ -121,7 +123,18 @@ classdef dataset_test < matlab.unittest.TestCase
             fprintf(fid,'enum2 - one, two, three, four,\n');
             fprintf(fid,'enum3 - do, re, mi, fa, sol, la, ti, do\n');
             fclose(fid);
-            
+            fid = fopen(testCase.table_specification_file,'w');
+            fprintf(fid,'tabletesting_specification - v0.1.0\n');
+            fprintf(fid,'---------------------------\n');
+            fprintf(fid,'extends: activity_result\n');
+            fprintf(fid,'\n');
+            fprintf(fid,'properties\n');
+            fprintf(fid,'----------\n');
+            fprintf(fid,'vec - f8 - num_points\n');
+            fprintf(fid,'mat - f8 - num_rows,num_cols\n');
+            fprintf(fid,'cube - f8 - num_layers,num_rows,num_cols\n');
+            fprintf(fid,'labels - str - num_rows\n');
+            fclose(fid);
             % Clear cached specification state so the temporary
             % specification files created for this test are re-read.
             escdf_dataset.reload_specification_cache();
@@ -136,40 +149,48 @@ classdef dataset_test < matlab.unittest.TestCase
             delete(testCase.test_specification_file);
             delete(testCase.choice_specification_file);
             delete(testCase.enum_specification_file);
+            delete(testCase.table_specification_file);
             escdf_dataset.reload_specification_cache();
         end
     end
 
     methods (Test)
         function testChoices(testCase)
+        % Verify that valid non-ambiguous choice branches are accepted and
+        % incomplete branches are rejected.
             test_dataset = escdf_dataset('choice_dataset','choicetesting_specification');
             test_dataset.a = 1;
             testCase.verifyFalse(test_dataset.validate());
             test_dataset.b = 1;
             testCase.verifyTrue(test_dataset.validate());
+
             test_dataset = escdf_dataset('choice_dataset','choicetesting_specification');
             test_dataset.a = 1;
             testCase.verifyFalse(test_dataset.validate());
             test_dataset.c = 1;
             testCase.verifyTrue(test_dataset.validate());
+
             test_dataset = escdf_dataset('choice_dataset','choicetesting_specification');
             test_dataset.d = 1;
             testCase.verifyTrue(test_dataset.validate());
             test_dataset.d = [1;1];
             testCase.verifyTrue(test_dataset.validate());
+
             test_dataset = escdf_dataset('choice_dataset','choicetesting_specification');
             test_dataset.e = 1.0;
             testCase.verifyTrue(test_dataset.validate());
             test_dataset.e = 1+1j;
             testCase.verifyTrue(test_dataset.validate());
+        end
+
+        function testChoicesReportsAmbiguousChoiceAsInvalid(testCase)
+        % Verify that a dataset matching multiple valid choice branches is
+        % reported as invalid rather than raising an exception.
+            test_dataset = escdf_dataset('choice_dataset','choicetesting_specification');
+            test_dataset.e = 1+1j;
             test_dataset.d = 1;
-            error_occurred = false;
-            try
-                test_dataset.validate();
-            catch
-                error_occurred = true;
-            end
-            testCase.verifyTrue(error_occurred);
+
+            testCase.verifyFalse(test_dataset.validate());
         end
 
         function testEnums(testCase)
@@ -427,6 +448,204 @@ classdef dataset_test < matlab.unittest.TestCase
                 prop = test_dataset.(prop_name);
                 testCase.verifyEqual(prop(:), prop_data);
             end
+        end
+
+        function test_get_supertypes_returns_canonical_ancestry_order(testCase)
+        % Verify that get_supertypes() returns canonical inheritance
+        % application order, beginning with the root ancestor and ending
+        % with the dataset type itself.
+            ds = escdf_dataset('d1', 'unittesting_specification');
+            testCase.verifyEqual(ds.get_supertypes(), ...
+                {'parameter_set', 'activity_result', 'unittesting_specification'});
+        end
+
+        function test_get_dimension_names_returns_symbolic_dimensions(testCase)
+        % Verify that get_dimension_names() returns symbolic dimensions from
+        % the effective resolved specification.
+            ds = escdf_dataset('d1', 'choicetesting_specification');
+            dimension_names = ds.get_dimension_names();
+
+            testCase.verifyTrue(any(strcmp(dimension_names, 'size_a')));
+        end
+
+        function test_istype_uses_canonical_inheritance_chain(testCase)
+        % Verify that istype() still works correctly when driven by
+        % canonical ancestry information.
+            ds = escdf_dataset('d1', 'unittesting_specification');
+
+            testCase.verifyTrue(ds.istype('unittesting_specification'));
+            testCase.verifyTrue(ds.istype('activity_result'));
+            testCase.verifyTrue(ds.istype('parameter_set'));
+            testCase.verifyFalse(ds.istype('scalar'));
+        end
+
+        function test_dump_to_table_vector_dimension(testCase)
+        % Verify that dump_to_table() returns a single-column table for a
+        % simple one-dimensional property.
+            ds = escdf_dataset('d1', 'tabletesting_specification');
+            ds.vec = [10.0; 20.0; 30.0];
+
+            table_out = ds.dump_to_table('num_points');
+
+            testCase.verifyEqual(table_out.Properties.VariableNames, {'vec(:)'});
+            testCase.verifyEqual(table_out{:, 'vec(:)'}, [10.0; 20.0; 30.0]);
+        end
+
+        function test_dump_to_table_middle_dimension_in_3d_property(testCase)
+        % Verify that dump_to_table() correctly uses a middle symbolic
+        % dimension as the row dimension for a three-dimensional property.
+            ds = escdf_dataset('d1', 'tabletesting_specification');
+
+            ds.mat = [
+                1.0 2.0
+                3.0 4.0
+                5.0 6.0
+            ];
+
+            cube = zeros(2, 3, 2);
+
+            cube(1,:,1) = [100.0, 102.0, 104.0];
+            cube(1,:,2) = [101.0, 103.0, 105.0];
+
+            cube(2,:,1) = [200.0, 202.0, 204.0];
+            cube(2,:,2) = [201.0, 203.0, 205.0];
+
+            ds.cube = cube;
+
+            ds.labels = {'row1'; 'row2'; 'row3'};
+
+            table_out = ds.dump_to_table('num_rows');
+
+            testCase.verifyEqual(height(table_out), 3);
+
+            % Matrix-derived columns
+            testCase.verifyTrue(any(strcmp(table_out.Properties.VariableNames, 'mat(:,1)')));
+            testCase.verifyTrue(any(strcmp(table_out.Properties.VariableNames, 'mat(:,2)')));
+            testCase.verifyEqual(table_out{:, 'mat(:,1)'}, [1.0; 3.0; 5.0]);
+            testCase.verifyEqual(table_out{:, 'mat(:,2)'}, [2.0; 4.0; 6.0]);
+
+            % Labels
+            testCase.verifyTrue(any(strcmp(table_out.Properties.VariableNames, 'labels(:)')));
+            testCase.verifyEqual(table_out{:, 'labels(:)'}, {'row1'; 'row2'; 'row3'});
+
+            % Cube-derived columns: verify row dimension comes from the
+            % middle canonical dimension.
+            testCase.verifyTrue(any(strcmp(table_out.Properties.VariableNames, 'cube(1,:,1)')));
+            testCase.verifyTrue(any(strcmp(table_out.Properties.VariableNames, 'cube(2,:,2)')));
+            testCase.verifyEqual(table_out{:, 'cube(1,:,1)'}, [100.0; 102.0; 104.0]);
+            testCase.verifyEqual(table_out{:, 'cube(2,:,2)'}, [201.0; 203.0; 205.0]);
+        end
+
+        function test_new_dataset_starts_in_expected_state(testCase)
+        % Verify that a newly constructed dataset starts memory-backed with
+        % no pending changes.
+            ds = escdf_dataset('d1', 'unittesting_specification');
+
+            testCase.verifyEqual(ds.get_backing_state(), 'memory');
+            testCase.verifyFalse(ds.get_has_pending_changes());
+            testCase.verifyFalse(ds.get_has_modified_properties());
+        end
+
+        function test_dataset_assignment_sets_pending_changes(testCase)
+        % Verify that assigning a property marks the dataset as having
+        % pending changes.
+            ds = escdf_dataset('d1', 'tabletesting_specification');
+            testCase.verifyFalse(ds.get_has_pending_changes());
+
+            ds.vec = [1.0; 2.0; 3.0];
+
+            testCase.verifyTrue(ds.get_has_pending_changes());
+            testCase.verifyEqual(ds.get_backing_state(), 'memory');
+        end
+
+        function test_loaded_dataset_starts_hdf5_native_with_no_pending_changes(testCase)
+        % Verify that a dataset loaded from disk starts HDF5-native and has
+        % no pending changes.
+            outfile = fullfile(testCase.temp_folder, 'dataset_state_roundtrip.h5');
+
+            f = escdf();
+            md = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
+            md.value = 2.0;
+            md.unit = {'g'};
+            testCase.verifyTrue(md.validate());
+
+            f.add_metadata(md);
+            f.write_to_disk(outfile, true);
+
+            loaded = escdf.load(outfile);
+            loaded_md = loaded.get_metadata('meta1');
+
+            testCase.verifyEqual(loaded_md.get_backing_state(), 'hdf5_native');
+            testCase.verifyFalse(loaded_md.get_has_pending_changes());
+            testCase.verifyFalse(loaded_md.get_has_modified_properties());
+        end
+
+        function test_dataset_write_to_disk_sets_hdf5_native_and_clears_pending_changes(testCase)
+        % Verify that writing a dataset to disk sets it HDF5-native and
+        % clears pending changes.
+            gid = H5G.create(testCase.file_id, 'meta1', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+            ds = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
+            ds.value = 2.0;
+            ds.unit = {'g'};
+
+            testCase.verifyTrue(ds.get_has_pending_changes());
+            testCase.verifyEqual(ds.get_backing_state(), 'memory');
+
+            ds.write_to_disk(gid);
+
+            testCase.verifyEqual(ds.get_backing_state(), 'hdf5_native');
+            testCase.verifyFalse(ds.get_has_pending_changes());
+
+            H5G.close(gid);
+        end
+
+        function test_dataset_read_into_memory_sets_memory_backing_state(testCase)
+        % Verify that reading a dataset into memory updates its dataset-level
+        % backing state to memory.
+            outfile = fullfile(testCase.temp_folder, 'dataset_read_into_memory_state.h5');
+
+            f = escdf();
+            md = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
+            md.value = 2.0;
+            md.unit = {'g'};
+            f.add_metadata(md);
+            f.write_to_disk(outfile, true);
+
+            loaded = escdf.load(outfile);
+            loaded_md = loaded.get_metadata('meta1');
+
+            testCase.verifyEqual(loaded_md.get_backing_state(), 'hdf5_native');
+
+            loaded_md.read_into_memory();
+
+            testCase.verifyEqual(loaded_md.get_backing_state(), 'memory');
+            testCase.verifyEqual(loaded_md.value.get_backing_state(), 'memory');
+            testCase.verifyEqual(loaded_md.unit.get_backing_state(), 'memory');
+        end
+
+        function test_attached_cloned_dataset_starts_memory_backed_and_not_pending_changes(testCase)
+        % Verify that an attached cloned dataset wrapper starts memory-backed
+        % and without pending changes.
+            source_file_path = fullfile(testCase.temp_folder, 'attached_clone_state.h5');
+
+            source_file = escdf();
+            md = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
+            md.value = 2.0;
+            md.unit = {'g'};
+            source_file.add_metadata(md);
+            source_file.write_to_disk(source_file_path, true);
+
+            loaded = escdf.load(source_file_path, true);
+            loaded_md = loaded.get_metadata('meta1');
+
+            target = escdf();
+            target.add_metadata(loaded_md);
+
+            attached_md = target.get_metadata('meta1');
+
+            testCase.verifyEqual(attached_md.get_backing_state(), 'memory');
+            testCase.verifyFalse(attached_md.get_has_pending_changes());
         end
     end
 

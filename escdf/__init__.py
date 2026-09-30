@@ -7,7 +7,12 @@ reading, and writing ESCDF datasets and files.
 """
 
 from .escdf_property import ESCDFProperty as Property
-from .escdf_dataset import ESCDFDataset as Dataset, ESCDFDatasetArray as DatasetArray
+from .escdf_dataset import (
+    ESCDFDataset as Dataset,
+    ESCDFDatasetArray as DatasetArray,
+    reload_specification_cache,
+    load_specification_directory,
+)
 from .escdf_activity import ESCDFActivity as Activity, ESCDFActivityArray as ActivityArray
 from .escdf import ESCDF
 from .escdf_class_factory import classes

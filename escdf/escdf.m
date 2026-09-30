@@ -35,6 +35,10 @@ classdef escdf < handle
         metadata_array
         created_by
         created_date
+        lifecycle_state
+        mutability_state
+        backing_state
+        has_pending_changes
     end
 
     properties (Dependent)
@@ -55,6 +59,51 @@ classdef escdf < handle
             obj.metadata_array = escdf_dataset.empty(1,0);
             obj.created_by = escdf.escdf_get_or_prompt_attribution_name();
             obj.created_date = datetime('now','TimeZone','UTC');
+
+            obj.lifecycle_state = 'draft';
+            obj.mutability_state = 'editable';
+            obj.backing_state = 'memory';
+            obj.has_pending_changes = false;
+        end
+
+        function out = get_created_by(obj)
+        % Return the file-level creator attribution.
+        %
+        % Returns
+        % -------
+        % out : char
+        %     Name or label recorded as the creator of the ESCDF file.
+            out = obj.created_by;
+        end
+
+        function out = get_created_date(obj)
+        % Return the file-level creation timestamp.
+        %
+        % Returns
+        % -------
+        % out : datetime
+        %     Datetime recorded as the file creation time.
+            out = obj.created_date;
+        end
+
+        function out = get_lifecycle_state(obj)
+        % Return the container lifecycle state.
+            out = obj.lifecycle_state;
+        end
+
+        function out = get_mutability_state(obj)
+        % Return the container mutability state.
+            out = obj.mutability_state;
+        end
+
+        function out = get_backing_state(obj)
+        % Return the container backing state.
+            out = obj.backing_state;
+        end
+
+        function out = get_has_pending_changes(obj)
+        % Return whether the container has pending changes.
+            out = obj.has_pending_changes;
         end
 
         function set_created_properties(obj, created_by, created_date)
@@ -82,6 +131,7 @@ classdef escdf < handle
                 error('created_date must be a datetime object')
             end
             obj.created_by = created_by;
+            obj.has_pending_changes = true;
         end
 
         function add_activity(obj,short_name,descriptive_name,activity_date,data,metadata_links)
@@ -124,6 +174,7 @@ classdef escdf < handle
             end
             new_activity = escdf_activity(short_name,descriptive_name,activity_date,data,metadata_links);
             obj.activities_array(end+1) = new_activity;
+            obj.has_pending_changes = true;
         end
 
         function add_metadata(obj,metadata,activity_to_link)
@@ -142,17 +193,32 @@ classdef escdf < handle
         % error
         %     Raised if the dataset name already exists in the metadata
         %     collection or if the linked activity name is invalid.
+        %
+        % Notes
+        % -----
+        % The supplied dataset is cloned into a new wrapper before
+        % insertion so that the container owns its own dataset/property
+        % wrapper objects.
+            if nargin < 3
+                activity_to_link = [];
+            end
+
             if ~isa(metadata,'escdf_dataset')
                 error('Added metadata must be an escdf_dataset object.')
             end
-            if any(strcmp(obj.get_metadata_names(),metadata.get_name()))
-                error(['Metadata with name ',metadata.get_name(),' already exists.'])
+
+            metadata_to_add = obj.clone_dataset_for_attach(metadata);
+
+            if any(strcmp(obj.get_metadata_names(),metadata_to_add.get_name()))
+                error(['Metadata with name ',metadata_to_add.get_name(),' already exists.'])
             end
-            obj.metadata_array(end+1) = metadata;
-            if nargin > 2
+            obj.metadata_array(end+1) = metadata_to_add;
+
+            if ~isempty(activity_to_link)
                 index = obj.get_activity_index_from_name(activity_to_link);
-                obj.activities(index).link_to_metadata(metadata.get_name());
+                obj.activities(index).link_to_metadata(metadata_to_add.get_name());
             end
+            obj.has_pending_changes = true;
         end
 
         function link_activity_to_metadata(obj,activity_name,metadata_name)
@@ -180,6 +246,7 @@ classdef escdf < handle
             end
             activity = obj.activities(activity_index);
             activity.link_to_metadata(metadata_name)
+            obj.has_pending_changes = true;
         end
 
         function unlink_activity_from_metadata(obj,activity_name,metadata_name)
@@ -200,7 +267,8 @@ classdef escdf < handle
                 error(['Name ',activity_name,' does not correspond to any defined names of activities.'])
             end
             activity = obj.activities(activity_index);
-            activity.unlink_from_metadata(metadata_name)
+            activity.unlink_from_metadata(metadata_name);
+            obj.has_pending_changes = true;
         end
 
         function add_data_to_activity(obj, activity_name, data)
@@ -215,10 +283,13 @@ classdef escdf < handle
         %
         % Notes
         % -----
-        % The dataset must be an activity_result dataset or inherit from
-        % activity_result.
+        % The supplied dataset is cloned into a new wrapper before
+        % insertion so that the activity/container owns its own
+        % dataset/property wrapper objects.
+            data_to_add = obj.clone_dataset_for_attach(data);
             activity = obj.get_activity_from_name(activity_name);
-            activity.add_data(data);
+            activity.add_data(data_to_add);
+            obj.has_pending_changes = true;
         end
 
         function remove_data_from_activity(obj, activity_name, data_name)
@@ -232,6 +303,7 @@ classdef escdf < handle
         %     Name of the dataset to remove.
             activity = obj.get_activity_from_name(activity_name);
             activity.remove_data(data_name);
+            obj.has_pending_changes = true;
         end
 
         function remove_metadata(obj,metadata_name)
@@ -246,6 +318,7 @@ classdef escdf < handle
                 obj.unlink_activity_from_metadata(linked_activities{i},metadata_name)
             end
             obj.metadata_array = remove_array_index(obj.metadata,index);
+            obj.has_pending_changes = true;
         end
 
         function remove_activity(obj,activity_name,remove_unused_metadata)
@@ -270,6 +343,7 @@ classdef escdf < handle
                 end
             end
             obj.activities_array = remove_array_index(obj.activities_array, index);
+            obj.has_pending_changes = true;
         end
 
         function data = get_activity_data(obj,activity_name,data_name)
@@ -362,6 +436,183 @@ classdef escdf < handle
             end
         end
 
+        function cloned = clone_property_for_attach(obj, property) %#ok<INUSD>
+        % Clone a property wrapper for attachment into a new container.
+        %
+        % Parameters
+        % ----------
+        % property : escdf_property
+        %     Source property to clone.
+        %
+        % Returns
+        % -------
+        % cloned : escdf_property
+        %     New property wrapper suitable for attachment into a new
+        %     dataset/container context.
+        %
+        % Notes
+        % -----
+        % First-pass behavior:
+        %
+        % - memory-backed properties are eagerly copied into new in-memory
+        %   property wrappers
+        % - hdf5_native properties are wrapped as hdf5_external in the
+        %   clone
+        % - hdf5_external properties remain externally backed in the clone
+            backing_state = property.get_backing_state();
+
+            if strcmp(backing_state, 'memory')
+                cloned = escdf_property( ...
+                    property.get_name(), ...
+                    property.get_format(), ...
+                    property.get_size(), ...
+                    'ragged', property.isragged());
+                cloned(:) = property(:);
+                return
+            end
+
+            if strcmp(backing_state, 'hdf5_native') || strcmp(backing_state, 'hdf5_external')
+                source_dataset_id = property.get_h5d_id();
+                dataset_path = H5I.get_name(source_dataset_id);
+                file_id = H5I.get_file_id(source_dataset_id);
+                cloned_dataset_id = H5D.open(file_id, dataset_path);
+
+                cloned = escdf_property.load(cloned_dataset_id);
+                cloned.mark_external_backing();
+                return
+            end
+
+            error('Unknown property backing_state "%s" for property %s.', ...
+                backing_state, property.get_name());
+        end
+
+        function cloned = clone_dataset_for_attach(obj, dataset) %#ok<INUSD>
+        % Clone a dataset wrapper for attachment into a new container.
+        %
+        % Parameters
+        % ----------
+        % dataset : escdf_dataset
+        %     Source dataset to clone.
+        %
+        % Returns
+        % -------
+        % cloned : escdf_dataset
+        %     New dataset wrapper suitable for insertion into a different
+        %     container.
+        %
+        % Notes
+        % -----
+        % This is a first-pass shallow-semantic clone of the dataset
+        % wrapper, with per-property handling delegated to
+        % clone_property_for_attach.
+            cloned = escdf_dataset( ...
+                dataset.get_name(), ...
+                dataset.get_type(), ...
+                dataset.get_descriptive_name(), ...
+                false);
+
+            version_numbers = dataset.get_version_numbers();
+            cloned.set_version(version_numbers(1), version_numbers(2), version_numbers(3));
+
+            property_names = properties(dataset);
+            for i = 1:length(property_names)
+                property_name = property_names{i};
+
+                % Skip hidden storage properties
+                if startsWith(property_name, 'DO_NOT_USE_')
+                    continue
+                end
+
+                try
+                    property_value = dataset.(property_name);
+                catch
+                    continue
+                end
+
+                if isempty(property_value)
+                    continue
+                end
+
+                % If the source dataset has a noncanonical dynamic property,
+                % mirror that dynamic property on the clone.
+                clone_properties = properties(cloned);
+                if ~ismember(property_name, clone_properties)
+                    hidden_prop = addprop(cloned, ['DO_NOT_USE_', property_name]);
+                    hidden_prop.Hidden = true;
+
+                    user_prop = addprop(cloned, property_name);
+                    user_prop.SetMethod = @(obj,val) escdf_dataset.set_dynamic_prop(property_name,obj,val);
+                    user_prop.GetMethod = @(obj) escdf_dataset.get_dynamic_prop(property_name,obj);
+
+                    cloned.has_modified_properties = true;
+                end
+
+                cloned_property = obj.clone_property_for_attach(property_value);
+                cloned.(property_name) = cloned_property;
+            end
+
+            if dataset.get_has_modified_properties()
+                cloned.has_modified_properties = true;
+            end
+
+            cloned.set_backing_state('memory');
+            cloned.set_has_pending_changes(false);
+        end
+
+        function insert_metadata_native(obj, metadata, activity_to_link)
+        % Insert a metadata dataset into the container without cloning.
+        %
+        % Parameters
+        % ----------
+        % metadata : escdf_dataset
+        %     Metadata dataset to insert directly.
+        % activity_to_link : char, optional
+        %     Name of an activity to link to the metadata immediately after
+        %     insertion.
+        %
+        % Notes
+        % -----
+        % This is intended for internal use during file loading, where the
+        % loaded dataset already belongs natively to the container being
+        % constructed.
+            if nargin < 3
+                activity_to_link = [];
+            end
+
+            if ~isa(metadata,'escdf_dataset')
+                error('Added metadata must be an escdf_dataset object.')
+            end
+            if any(strcmp(obj.get_metadata_names(),metadata.get_name()))
+                error(['Metadata with name ',metadata.get_name(),' already exists.'])
+            end
+            obj.metadata_array(end+1) = metadata;
+            if ~isempty(activity_to_link)
+                index = obj.get_activity_index_from_name(activity_to_link);
+                obj.activities(index).link_to_metadata(metadata.get_name());
+            end
+            obj.has_pending_changes = true;
+        end
+
+        function insert_data_to_activity_native(obj, activity_name, data)
+        % Insert a dataset into an activity without cloning.
+        %
+        % Parameters
+        % ----------
+        % activity_name : char
+        %     Name of the target activity.
+        % data : escdf_dataset
+        %     Dataset to insert directly.
+        %
+        % Notes
+        % -----
+        % This is intended for internal use during file loading, where the
+        % loaded dataset already belongs natively to the container being
+        % constructed.
+            activity = obj.get_activity_from_name(activity_name);
+            activity.add_data(data);
+            obj.has_pending_changes = true;
+        end
+
         function file_id = write_to_disk(obj,file_path,clobber)
         % Write the container to an HDF5 file.
         %
@@ -443,6 +694,8 @@ classdef escdf < handle
             agid = H5G.create(file_id,'activities', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
             obj.activities.write_to_disk(agid);
             H5G.close(agid);
+            obj.backing_state = 'hdf5_native';
+            obj.has_pending_changes = false;
         end
 
         function varargout = subsref(obj, S)
@@ -609,7 +862,7 @@ classdef escdf < handle
             for i = 1:length(metadata_names)
                 metadata_name = metadata_names{i};
                 dataset = escdf_dataset.load([hdf5_path,'::/',metadata_name],readonly);
-                escdf_file.add_metadata(dataset);
+                escdf_file.insert_metadata_native(dataset);
             end
 
             for i = 1:length(activity_names)
@@ -648,9 +901,17 @@ classdef escdf < handle
                 for j = 1:length(activity_data_names)
                     activity_data_name = activity_data_names{j};
                     dataset = escdf_dataset.load([hdf5_path,'::/activities/',activity_name,'/',activity_data_name],readonly);
-                    escdf_file.add_data_to_activity(valid_activity_name,dataset);
+                    escdf_file.insert_data_to_activity_native(valid_activity_name,dataset);
                 end
             end
+            escdf_file.backing_state = 'hdf5_native';
+            escdf_file.lifecycle_state = 'draft';
+            if readonly
+                escdf_file.mutability_state = 'read_only';
+            else
+                escdf_file.mutability_state = 'editable';
+            end
+            escdf_file.has_pending_changes = false;
         end
 
         function escdf_file = build_from_struct(structure)

@@ -13,6 +13,7 @@ import h5py as h5
 import warnings
 from .escdf_activity import ESCDFActivity, ESCDFActivityArray
 from .escdf_dataset import ESCDFDataset, ESCDFDatasetArray
+from .escdf_property import ESCDFProperty
 from .escdf_timestamps import _datetime_to_iso_utc, _datetime_from_iso_utc
 from .valid_names import is_valid_identifier, make_valid_identifier
 import json
@@ -60,7 +61,16 @@ class ESCDF:
     ESCDFActivity
     """
 
-    __slots__ = ("_activities", "_metadata", "_created_by", "_created_date")
+    __slots__ = (
+        "_activities",
+        "_metadata",
+        "_created_by",
+        "_created_date",
+        "_lifecycle_state",
+        "_mutability_state",
+        "_backing_state",
+        "_has_pending_changes",
+    )
 
     @property
     def activities(self):
@@ -78,6 +88,22 @@ class ESCDF:
     def created_date(self):
         return self._created_date
 
+    @property
+    def lifecycle_state(self):
+        return self._lifecycle_state
+
+    @property
+    def mutability_state(self):
+        return self._mutability_state
+
+    @property
+    def backing_state(self):
+        return self._backing_state
+
+    @property
+    def has_pending_changes(self):
+        return self._has_pending_changes
+
     def __init__(self):
         """
         Initialize an empty ESCDF container.
@@ -91,6 +117,11 @@ class ESCDF:
         self._metadata = ESCDFDatasetArray()
         self._created_by = ESCDF.get_or_prompt_attribution_name()
         self._created_date = datetime.now(timezone.utc)
+
+        self._lifecycle_state = "draft"
+        self._mutability_state = "editable"
+        self._backing_state = "memory"
+        self._has_pending_changes = False
 
     def set_created_properties(self, created_by, created_date=None):
         """
@@ -116,6 +147,7 @@ class ESCDF:
             else:
                 raise ValueError("created_date must be a `datetime` object.")
         self._created_by = created_by
+        self._has_pending_changes = True
 
     def add_activity(
         self, short_name, descriptive_name, activity_date, data=None, metadata_links=None
@@ -161,6 +193,7 @@ class ESCDF:
             short_name, descriptive_name, activity_date, data, metadata_links
         )
         self.activities.add_activity(new_activity)
+        self._has_pending_changes = True
 
     def add_metadata(self, metadata, activity_to_link=None):
         """
@@ -179,10 +212,18 @@ class ESCDF:
         ValueError
             If the dataset name already exists in the metadata collection
             or if the linked activity name is invalid.
+
+        Notes
+        -----
+        The supplied dataset is cloned into a new wrapper before
+        insertion so that the container owns its own dataset/property
+        wrapper objects.
         """
-        self.metadata.add_dataset(metadata)
+        metadata_to_add = self._clone_dataset_for_attach(metadata)
+        self.metadata.add_dataset(metadata_to_add)
         if activity_to_link is not None:
-            self.activities[activity_to_link].link_to_metadata(metadata.name)
+            self.activities[activity_to_link].link_to_metadata(metadata_to_add.name)
+        self._has_pending_changes = True
 
     def add_metadata_with_duplicate_check(self, metadata, activity_to_link=None):
         """
@@ -222,6 +263,8 @@ class ESCDF:
             name = existing_metadata.name
             if activity_to_link is not None:
                 self.link_activity_to_metadata(activity_to_link, name)
+        if metadata_is_new or (activity_to_link is not None):
+            self._has_pending_changes = True
         return name
 
     def link_activity_to_metadata(self, activity_name, metadata_name):
@@ -246,6 +289,7 @@ class ESCDF:
                 "Name {:} does not correspond to any defined metadata names".format(metadata_name)
             )
         self.activities[activity_name].link_to_metadata(metadata_name)
+        self._has_pending_changes = True
 
     def unlink_activity_from_metadata(self, activity_name, metadata_name):
         """
@@ -259,6 +303,7 @@ class ESCDF:
             Name of the metadata dataset to unlink.
         """
         self.activities[activity_name].unlink_from_metadata(metadata_name)
+        self._has_pending_changes = True
 
     def add_data_to_activity(self, activity_name, data):
         """
@@ -273,10 +318,13 @@ class ESCDF:
 
         Notes
         -----
-        The dataset must be an ``activity_result`` dataset or inherit from
-        ``activity_result``.
+        The supplied dataset is cloned into a new wrapper before
+        insertion so that the activity/container owns its own
+        dataset/property wrapper objects.
         """
-        self.activities[activity_name].add_data(data)
+        data_to_add = self._clone_dataset_for_attach(data)
+        self.activities[activity_name].add_data(data_to_add)
+        self._has_pending_changes = True
 
     def remove_data_from_activity(self, activity_name, data_name):
         """
@@ -290,6 +338,7 @@ class ESCDF:
             Name of the dataset to remove.
         """
         self.activities[activity_name].remove_data(data_name)
+        self._has_pending_changes = True
 
     def get_activity_data(self, activity_name, data_name=None):
         """
@@ -339,6 +388,147 @@ class ESCDF:
         """
         metadata = [self.metadata[name] for name in self.activities[activity_name].metadata_links]
         return ESCDFDatasetArray(metadata)
+
+    @staticmethod
+    def _clone_property_for_attach(property_):
+        """
+        Clone a property wrapper for attachment into a new container.
+
+        Parameters
+        ----------
+        property_ : ESCDFProperty
+            Source property to clone.
+
+        Returns
+        -------
+        ESCDFProperty
+            New property wrapper suitable for attachment into a new
+            dataset/container context.
+
+        Notes
+        -----
+        First-pass behavior:
+
+        - memory-backed properties are eagerly copied into new in-memory
+          property wrappers
+        - ``hdf5_native`` properties are wrapped as ``hdf5_external`` in
+          the clone
+        - ``hdf5_external`` properties remain externally backed in the
+          clone
+        """
+        if property_.backing_state == "memory":
+            cloned = ESCDFProperty(
+                property_.name,
+                property_.datatype,
+                property_.shape,
+                ragged=property_.ragged,
+            )
+            cloned[...] = property_[...]
+            return cloned
+
+        if property_.backing_state in {"hdf5_native", "hdf5_external"}:
+            cloned = ESCDFProperty.load(h5_dataset=property_.h5_dataset)
+            cloned.mark_external_backing()
+            return cloned
+
+        raise ValueError(
+            f'Unknown property backing_state "{property_.backing_state}" for property {property_.name}.'
+        )
+
+    @classmethod
+    def _clone_dataset_for_attach(cls, dataset):
+        """
+        Clone a dataset wrapper for attachment into a new container.
+
+        Parameters
+        ----------
+        dataset : ESCDFDataset
+            Source dataset to clone.
+
+        Returns
+        -------
+        ESCDFDataset
+            New dataset wrapper suitable for insertion into a different
+            container.
+
+        Notes
+        -----
+        This is a first-pass shallow-semantic clone of the dataset
+        wrapper, with per-property handling delegated to
+        :meth:`_clone_property_for_attach`.
+        """
+        cloned = ESCDFDataset(
+            dataset.name,
+            dataset.dataset_type,
+            dataset.descriptive_name,
+            replace_invalid_names=False,
+        )
+        cloned.set_version(*dataset.version_numbers)
+
+        for property_name in sorted(dataset._valid_properties):
+            property_value = getattr(dataset, property_name, None)
+            if property_value is None:
+                continue
+
+            if property_name not in cloned._valid_properties:
+                cloned._valid_properties.add(property_name)
+                cloned._modified_properties.add(property_name)
+                cloned._has_modified_properties = True
+
+            setattr(cloned, property_name, cls._clone_property_for_attach(property_value))
+
+        # Preserve malformed/extra-property state if present.
+        cloned._has_modified_properties = (
+            dataset.has_modified_properties or cloned._has_modified_properties
+        )
+        cloned._modified_properties.update(dataset._modified_properties)
+
+        cloned._backing_state = "memory"
+        cloned._has_pending_changes = False
+        return cloned
+
+    def _insert_metadata_native(self, metadata, activity_to_link=None):
+        """
+        Insert a metadata dataset into the container without cloning.
+
+        Parameters
+        ----------
+        metadata : ESCDFDataset
+            Metadata dataset to insert directly.
+        activity_to_link : str, optional
+            Name of an activity to link to the metadata immediately after
+            insertion.
+
+        Notes
+        -----
+        This is intended for internal use during file loading, where the
+        loaded dataset already belongs natively to the container being
+        constructed.
+        """
+        self.metadata.add_dataset(metadata)
+        if activity_to_link is not None:
+            self.activities[activity_to_link].link_to_metadata(metadata.name)
+        self._has_pending_changes = True
+
+    def _insert_data_to_activity_native(self, activity_name, data):
+        """
+        Insert a dataset into an activity without cloning.
+
+        Parameters
+        ----------
+        activity_name : str
+            Name of the target activity.
+        data : ESCDFDataset
+            Dataset to insert directly.
+
+        Notes
+        -----
+        This is intended for internal use during file loading, where the
+        loaded dataset already belongs natively to the container being
+        constructed.
+        """
+        self.activities[activity_name].add_data(data)
+        self._has_pending_changes = True
 
     def write_to_disk(self, h5_file, clobber=False):
         """
@@ -398,6 +588,8 @@ class ESCDF:
         activity_group = h5_file.create_group("activities")
         for activity in self.activities:
             activity.write_to_disk(activity_group)
+        self._backing_state = "hdf5_native"
+        self._has_pending_changes = False
         h5_file.flush()
         return h5_file
 
@@ -455,7 +647,8 @@ class ESCDF:
         ]
         for name in metadata_names:
             dataset = ESCDFDataset.load(h5_file, name)
-            escdf_file.add_metadata(dataset)
+            dataset = ESCDFDataset.load(h5_file, name)
+            escdf_file._insert_metadata_native(dataset)
         activity_groups = h5_file["activities"]
         activity_names = [
             key for key in activity_groups.keys() if isinstance(activity_groups[key], h5.Group)
@@ -500,7 +693,11 @@ class ESCDF:
             ]
             for activity_data_name in activity_data_names:
                 dataset = ESCDFDataset.load(h5_group=activity_group[activity_data_name])
-                escdf_file.add_data_to_activity(valid_activity_name, dataset)
+                escdf_file._insert_data_to_activity_native(valid_activity_name, dataset)
+        escdf_file._backing_state = "hdf5_native"
+        escdf_file._lifecycle_state = "draft"
+        escdf_file._mutability_state = "read_only" if readonly else "editable"
+        escdf_file._has_pending_changes = False
         return escdf_file
 
     @staticmethod

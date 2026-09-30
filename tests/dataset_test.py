@@ -7,6 +7,7 @@ THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 import string
 import numpy as np
+import escdf
 rng = np.random.default_rng()
 FLOAT_SCALE = 10000
 CHARACTERS = string.ascii_letters+string.digits
@@ -21,6 +22,9 @@ def hdf5_and_properties(tmp_path):
     test_specification_file  = os.path.join(test_specification_path,'unittesting_specification.txt')
     choice_specification_file = os.path.join(test_specification_path,'choicetesting_specification.txt')
     enum_specification_file = os.path.join(test_specification_path,'enumtesting_specification.txt')
+    table_specification_file = os.path.join(
+        test_specification_path, "tabletesting_specification.txt"
+    )
     data_type = [
         'u1','u2','u4','u8',
         'i1','i2','i4','i8',
@@ -98,6 +102,17 @@ def hdf5_and_properties(tmp_path):
         f.write('enum1 - red,orange,yellow,green,blue,violet\n')
         f.write('enum2 - one, two, three, four,\n')
         f.write('enum3 - do, re, mi, fa, sol, la, ti, do\n')
+    with open(table_specification_file, "w") as f:
+        f.write("tabletesting_specification - v0.1.0\n")
+        f.write("---------------------------\n")
+        f.write("extends: activity_result\n")
+        f.write("\n")
+        f.write("properties\n")
+        f.write("----------\n")
+        f.write("vec - f8 - num_points\n")
+        f.write("mat - f8 - num_rows,num_cols\n")
+        f.write("cube - f8 - num_layers,num_rows,num_cols\n")
+        f.write("labels - str - num_rows\n")
     for key in list(sys.modules.keys()):
         if key.startswith('escdf'):
             del sys.modules[key]
@@ -106,36 +121,57 @@ def hdf5_and_properties(tmp_path):
     os.remove(test_specification_file)
     os.remove(choice_specification_file)
     os.remove(enum_specification_file)
+    os.remove(table_specification_file)
 
 def testChoices(hdf5_and_properties):
+    """
+    Verify that valid non-ambiguous choice branches are accepted and
+    incomplete branches are rejected.
+    """
     hdf5_file_path, property_names, property_values, escdf = hdf5_and_properties
-    test_dataset = escdf.Dataset('choice_dataset','choicetesting_specification')
+
+    test_dataset = escdf.Dataset("choice_dataset", "choicetesting_specification")
     test_dataset.a = 1
     assert not test_dataset.validate()
     test_dataset.b = 1
     assert test_dataset.validate()
-    test_dataset = escdf.Dataset('choice_dataset','choicetesting_specification')
+
+    test_dataset = escdf.Dataset("choice_dataset", "choicetesting_specification")
     test_dataset.a = 1
     assert not test_dataset.validate()
     test_dataset.c = 1
     assert test_dataset.validate()
-    test_dataset = escdf.Dataset('choice_dataset','choicetesting_specification')
+
+    test_dataset = escdf.Dataset("choice_dataset", "choicetesting_specification")
     test_dataset.d = 1
     assert test_dataset.validate()
-    test_dataset.d = [1,1]
+    test_dataset.d = [1, 1]
     assert test_dataset.validate()
-    test_dataset = escdf.Dataset('choice_dataset','choicetesting_specification')
+
+    test_dataset = escdf.Dataset("choice_dataset", "choicetesting_specification")
     test_dataset.e = 1.0
     assert test_dataset.validate()
-    test_dataset.e = 1+1j
+    test_dataset.e = 1 + 1j
     assert test_dataset.validate()
+
+
+def testChoices_reports_ambiguous_choice_as_invalid(hdf5_and_properties):
+    """
+    Verify that a dataset matching multiple valid choice branches is
+    reported as invalid rather than raising an exception.
+    """
+    hdf5_file_path, property_names, property_values, escdf = hdf5_and_properties
+
+    test_dataset = escdf.Dataset("choice_dataset", "choicetesting_specification")
+    test_dataset.e = 1 + 1j
     test_dataset.d = 1
-    error_occurred = False
-    try:
-        test_dataset.validate()
-    except ValueError:
-        error_occurred = True;
-    assert error_occurred;
+
+    assert test_dataset.validate() is False
+
+    report = test_dataset.validate(report=True)
+    assert report.is_valid is False
+    assert len(report.ambiguous_choices) > 0
+
 
 def testEnums(hdf5_and_properties):
     hdf5_file_path, property_names, property_values, escdf = hdf5_and_properties
@@ -290,3 +326,286 @@ def testStorageAndRecall(hdf5_and_properties):
                 assert was_called
             else:
                 np.testing.assert_array_equal(prop[...].view(np.ndarray),data)
+
+
+def test_get_supertypes_returns_canonical_ancestry_order(hdf5_and_properties):
+    """
+    Verify that get_supertypes() returns canonical inheritance application
+    order, beginning with the root ancestor and ending with the dataset
+    type itself.
+    """
+    hdf5_file_path, property_names, property_values, escdf = hdf5_and_properties
+
+    ds = escdf.Dataset("d1", "unittesting_specification")
+    assert ds.get_supertypes() == [
+        "parameter_set",
+        "activity_result",
+        "unittesting_specification",
+    ]
+
+
+def test_get_dimension_names_returns_symbolic_dimensions(hdf5_and_properties):
+    """
+    Verify that get_dimension_names() returns symbolic dimensions from the
+    effective resolved specification.
+    """
+    hdf5_file_path, property_names, property_values, escdf = hdf5_and_properties
+
+    ds = escdf.Dataset("d1", "choicetesting_specification")
+    dimension_names = ds.get_dimension_names()
+
+    assert "size_a" in dimension_names
+
+
+def test_istype_uses_canonical_inheritance_chain(hdf5_and_properties):
+    """
+    Verify that istype() still works correctly when driven by canonical
+    ancestry information.
+    """
+    hdf5_file_path, property_names, property_values, escdf = hdf5_and_properties
+
+    ds = escdf.Dataset("d1", "unittesting_specification")
+
+    assert ds.istype("unittesting_specification") is True
+    assert ds.istype("activity_result") is True
+    assert ds.istype("parameter_set") is True
+    assert ds.istype("scalar") is False
+
+
+def test_dump_to_table_vector_dimension(hdf5_and_properties):
+    """
+    Verify that dump_to_table() returns a single-column table for a simple
+    one-dimensional property.
+    """
+    hdf5_file_path, property_names, property_values, escdf = hdf5_and_properties
+
+    ds = escdf.Dataset("d1", "tabletesting_specification")
+    ds.vec = np.array([10.0, 20.0, 30.0], dtype=np.float64)
+
+    table = ds.dump_to_table("num_points")
+
+    assert list(table.columns) == ["vec[:]"]
+    np.testing.assert_allclose(table["vec[:]"].to_numpy(), np.array([10.0, 20.0, 30.0]))
+
+
+def test_dump_to_table_middle_dimension_in_3d_property(hdf5_and_properties):
+    """
+    Verify that dump_to_table() correctly uses a middle symbolic dimension
+    as the row dimension for a three-dimensional property.
+    """
+    hdf5_file_path, property_names, property_values, escdf = hdf5_and_properties
+
+    ds = escdf.Dataset("d1", "tabletesting_specification")
+
+    ds.mat = np.array(
+        [
+            [1.0, 2.0],
+            [3.0, 4.0],
+            [5.0, 6.0],
+        ],
+        dtype=np.float64,
+    )
+
+    ds.cube = np.array(
+        [
+            [
+                [100.0, 101.0],
+                [102.0, 103.0],
+                [104.0, 105.0],
+            ],
+            [
+                [200.0, 201.0],
+                [202.0, 203.0],
+                [204.0, 205.0],
+            ],
+        ],
+        dtype=np.float64,
+    )
+
+    ds.labels = np.array(["row1", "row2", "row3"], dtype=object)
+
+    table = ds.dump_to_table("num_rows")
+
+    # Number of rows should match num_rows, which is the middle dimension
+    assert len(table) == 3
+
+    # Matrix-derived columns should be present
+    assert "mat[:,0]" in table.columns
+    assert "mat[:,1]" in table.columns
+    np.testing.assert_allclose(table["mat[:,0]"].to_numpy(), np.array([1.0, 3.0, 5.0]))
+    np.testing.assert_allclose(table["mat[:,1]"].to_numpy(), np.array([2.0, 4.0, 6.0]))
+
+    # String labels should also align with num_rows
+    assert "labels[:]" in table.columns
+    np.testing.assert_array_equal(
+        table["labels[:]"].to_numpy(),
+        np.array(["row1", "row2", "row3"], dtype=object),
+    )
+
+    # Cube-derived columns: verify that the middle dimension is used for rows
+    assert "cube[0,:,0]" in table.columns
+    assert "cube[1,:,1]" in table.columns
+    np.testing.assert_allclose(
+        table["cube[0,:,0]"].to_numpy(),
+        np.array([100.0, 102.0, 104.0]),
+    )
+    np.testing.assert_allclose(
+        table["cube[1,:,1]"].to_numpy(),
+        np.array([201.0, 203.0, 205.0]),
+    )
+
+
+def test_new_dataset_starts_in_expected_state(hdf5_and_properties):
+    """
+    Verify that a newly constructed dataset starts as memory-backed with no
+    pending changes.
+    """
+    hdf5_file_path, property_names, property_values, escdf = hdf5_and_properties
+
+    ds = escdf.Dataset("d1", "unittesting_specification")
+
+    assert ds.backing_state == "memory"
+    assert ds.has_pending_changes is False
+    assert ds.has_modified_properties is False
+
+
+def test_dataset_assignment_sets_pending_changes(hdf5_and_properties):
+    """
+    Verify that assigning a property marks the dataset as having pending
+    changes.
+    """
+    hdf5_file_path, property_names, property_values, escdf = hdf5_and_properties
+
+    ds = escdf.Dataset("d1", "tabletesting_specification")
+    assert ds.has_pending_changes is False
+
+    ds.vec = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+
+    assert ds.has_pending_changes is True
+    assert ds.backing_state == "memory"
+
+
+def test_loaded_dataset_starts_hdf5_native_with_no_pending_changes(tmp_path, monkeypatch):
+    """
+    Verify that a dataset loaded from disk starts HDF5-native and has no
+    pending changes.
+    """
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "dataset_state_roundtrip.h5"
+
+    f = escdf.ESCDF()
+    md = escdf.Dataset("meta1", "scalar", "Scalar metadata")
+    md.value = 2.0
+    md.unit = "g"
+    assert md.validate()
+
+    f.add_metadata(md)
+    f.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path))
+    loaded_md = loaded.metadata["meta1"]
+
+    assert loaded_md.backing_state == "hdf5_native"
+    assert loaded_md.has_pending_changes is False
+    assert loaded_md.has_modified_properties is False
+
+
+def test_dataset_write_to_disk_sets_hdf5_native_and_clears_pending_changes(tmp_path, monkeypatch):
+    """
+    Verify that writing a dataset to disk sets it HDF5-native and clears
+    pending changes.
+    """
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "dataset_write_state.h5"
+    h5_file = h5py.File(file_path, "w")
+
+    ds = escdf.Dataset("meta1", "scalar", "Scalar metadata")
+    ds.value = 2.0
+    ds.unit = "g"
+
+    assert ds.has_pending_changes is True
+    assert ds.backing_state == "memory"
+
+    group = h5_file.create_group("meta1")
+    ds.write_to_disk(group)
+
+    assert ds.backing_state == "hdf5_native"
+    assert ds.has_pending_changes is False
+
+    h5_file.close()
+
+
+def test_dataset_read_into_memory_sets_memory_backing_state(tmp_path, monkeypatch):
+    """
+    Verify that reading a dataset into memory updates its dataset-level
+    backing state to memory.
+    """
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "dataset_read_into_memory_state.h5"
+
+    f = escdf.ESCDF()
+    md = escdf.Dataset("meta1", "scalar", "Scalar metadata")
+    md.value = 2.0
+    md.unit = "g"
+    f.add_metadata(md)
+    f.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path))
+    loaded_md = loaded.metadata["meta1"]
+
+    assert loaded_md.backing_state == "hdf5_native"
+
+    loaded_md.read_into_memory()
+
+    assert loaded_md.backing_state == "memory"
+    assert loaded_md.value.backing_state == "memory"
+    assert loaded_md.unit.backing_state == "memory"
+
+
+def test_attached_cloned_dataset_starts_memory_backed_and_not_pending_changes(
+    tmp_path, monkeypatch
+):
+    """
+    Verify that an attached cloned dataset wrapper starts memory-backed and
+    without pending changes.
+    """
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "attached_clone_state.h5"
+
+    source_file = escdf.ESCDF()
+    md = escdf.Dataset("meta1", "scalar", "Scalar metadata")
+    md.value = 2.0
+    md.unit = "g"
+    source_file.add_metadata(md)
+    source_file.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path), readonly=True)
+    loaded_md = loaded.metadata["meta1"]
+
+    target = escdf.ESCDF()
+    target.add_metadata(loaded_md)
+
+    attached_md = target.metadata["meta1"]
+
+    assert attached_md.backing_state == "memory"
+    assert attached_md.has_pending_changes is False

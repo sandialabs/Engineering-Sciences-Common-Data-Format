@@ -37,7 +37,7 @@ classifiers = [
     ]
 
 [project.optional-dependencies]
-test = ['pytest','pytest-cov','coverage']
+test = ['pytest','pytest-cov','coverage','pandas']
 lint = ["pylint"]
 book = ["jupyter-book", "notebook", "jupyterlab", "jupyter-server", "ipykernel", "jupyter-matlab-proxy"]
 

@@ -42,6 +42,8 @@ classdef escdf_dataset < handle & dynamicprops
         name;
         descriptive_name;
         has_modified_properties;
+        has_pending_changes;
+        backing_state;
         version;
     end
 
@@ -79,49 +81,43 @@ classdef escdf_dataset < handle & dynamicprops
                 error('Invalid Name %s.  Names must start with a letter and consist of only letters, numbers, and underscores.', name)
             end
             obj.has_modified_properties = false;
+            obj.has_pending_changes = false;
+            obj.backing_state = 'memory';
             obj.name = name;
             obj.dataset_type = dataset_type;
             obj.descriptive_name = descriptive_name;
-            [info, property_dictionary] = escdf_dataset.get_specification_info(dataset_type);
-            obj.version = info{7};
-            keyArray = keys(property_dictionary);
-            for i = 1:length(keyArray)
-                property_name = keyArray{i};
+
+            registry = escdf_dataset.specification_cache_state('get');
+            if isempty(registry)
+                escdf_dataset.reload_specification_cache();
+                registry = escdf_dataset.specification_cache_state('get');
+            end
+
+            resolved_specification = registry.resolve(dataset_type);
+            obj.version = resolved_specification.version.as_array();
+
+            property_names = resolved_specification.property_names;
+            for i = 1:length(property_names)
+                property_name = property_names{i};
+
                 % In order to add custom setters, we add two dynamic
                 % properties.  The DO_NOT_USE one is actually used to store
                 % the data.  The other one is the user facing one that that
                 % user will interact with.  The setters will store the data
                 % into the hidden variable, and the getters will retrieve
                 % it.
-                if isa(property_dictionary(property_name),'containers.Map')
-                    options = property_dictionary(property_name);
-                    option_names = keys(options);
-                    for j = 1:length(option_names)
-                        option_properties = options(option_names{j});
-                        for k = 1:length(option_properties)
-                            option_property_name = option_properties{k}{1};
-                            current_properties = properties(obj);
-                            if ~ismember(option_property_name,current_properties)
-                                prop = addprop(obj,['DO_NOT_USE_',option_property_name]);
-                                prop.Hidden = true;
-                                % This is the property that the user will interact with.
-                                prop = addprop(obj,option_property_name);
-                                % We use custom setters to make sure that the data is in
-                                % the right format.
-                                prop.SetMethod = @(obj,val) escdf_dataset.set_dynamic_prop(option_property_name,obj,val);
-                                prop.GetMethod = @(obj) escdf_dataset.get_dynamic_prop(option_property_name,obj);
-                            end
-                        end
-                    end
-                else
-                    prop = addprop(obj,['DO_NOT_USE_',property_name]);
-                    prop.Hidden = true;
+
+                current_properties = properties(obj);
+                if ~ismember(property_name, current_properties)
+                    hidden_prop = addprop(obj, ['DO_NOT_USE_', property_name]);
+                    hidden_prop.Hidden = true;
+
                     % This is the property that the user will interact with.
-                    prop = addprop(obj,property_name);
+                    user_prop = addprop(obj, property_name);
                     % We use custom setters to make sure that the data is in
                     % the right format.
-                    prop.SetMethod = @(obj,val) escdf_dataset.set_dynamic_prop(property_name,obj,val);
-                    prop.GetMethod = @(obj) escdf_dataset.get_dynamic_prop(property_name,obj);
+                    user_prop.SetMethod = @(obj,val) escdf_dataset.set_dynamic_prop(property_name,obj,val);
+                    user_prop.GetMethod = @(obj) escdf_dataset.get_dynamic_prop(property_name,obj);
                 end
             end
         end
@@ -133,317 +129,132 @@ classdef escdf_dataset < handle & dynamicprops
         function name = get_descriptive_name(obj)
             name = obj.descriptive_name;
         end
+
         function version = get_version(obj)
             version = ['v',num2str(obj.version(1)),'.',num2str(obj.version(2)),'.',num2str(obj.version(3))];
         end
+
         function set_version(obj,major,minor,hotfix)
             obj.version = [major,minor,hotfix];
         end
+
         function version = get_version_numbers(obj)
             version = obj.version;
         end
 
-        function valid_choices = find_valid_choice_specification(obj,choice_dictionary)
-        % Identify valid choice branches for a specification choice group.
-        %
-        % Parameters
-        % ----------
-        % choice_dictionary : containers.Map
-        %     Mapping from choice name to property-definition lists.
+        function out = get_has_modified_properties(obj)
+        % Return whether the dataset contains modified or extra properties.
         %
         % Returns
         % -------
-        % valid_choices : cell array of char
-        %     Names of choice branches that validate successfully for the
-        %     current dataset state.
-            valid_choices = {};
-            choices = keys(choice_dictionary);
-            for i = 1:length(choices)
-                if escdf_dataset.VERBOSE
-                    disp(['Choice: ',choices{i}]);
-                end
-                property_dictionary = choice_dictionary(choices{i});
-                isvalid = obj.validate(property_dictionary,true);
-                if isvalid
-                    valid_choices{end+1} = choices{i};
-                end
-            end
+        % out : logical
+        %     True if the dataset has modified or unknown properties that make it
+        %     ineligible for normal valid write operations.
+            out = obj.has_modified_properties;
         end
 
-        function isvalid = validate(obj,property_dictionary,hide_issues)
+        function dimension_names = get_dimension_names(obj)
+        % Return symbolic dimension names used by the dataset specification.
+        %
+        % Returns
+        % -------
+        % dimension_names : cell array of char
+        %     Unique named dimensions referenced by the effective dataset
+        %     specification.
+            registry = escdf_dataset.specification_cache_state('get');
+            if isempty(registry)
+                escdf_dataset.reload_specification_cache();
+                registry = escdf_dataset.specification_cache_state('get');
+            end
+
+            resolved_specification = registry.resolve(obj.get_type());
+            dimension_names = resolved_specification.dimension_names;
+        end
+
+        function out = get_has_pending_changes(obj)
+        % Return whether the dataset has pending changes.
+        %
+        % Returns
+        % -------
+        % out : logical
+        %     True if the dataset has pending changes relative to its
+        %     current authoritative/reference state.
+            out = obj.has_pending_changes;
+        end
+
+        function out = get_backing_state(obj)
+        % Return the dataset backing state.
+        %
+        % Returns
+        % -------
+        % out : char
+        %     Dataset backing state.
+            out = obj.backing_state;
+        end
+
+        function set_backing_state(obj, state)
+        % Set the dataset backing state.
+        %
+        % Parameters
+        % ----------
+        % state : char
+        %     Dataset backing state string.
+            obj.backing_state = state;
+        end
+
+        function set_has_pending_changes(obj, tf)
+        % Set the dataset pending-changes flag.
+        %
+        % Parameters
+        % ----------
+        % tf : logical
+        %     Pending-changes state.
+            obj.has_pending_changes = tf;
+        end
+
+        function out = validate(obj,hide_issues,report)
         % Validate dataset properties against the active specification.
         %
         % Parameters
         % ----------
-        % property_dictionary : containers.Map or cell array, optional
-        %     Alternate property definition mapping to validate against. If
-        %     omitted, the dataset's declared specification is used.
         % hide_issues : logical, optional
         %     If true, suppress diagnostic messages describing validation
         %     failures.
+        % report : logical, optional
+        %     If true, return a structured ValidationReport instead of a
+        %     logical validity flag.
         %
         % Returns
         % -------
-        % isvalid : logical
+        % out : logical or ValidationReport
         %     True if the dataset satisfies the specification and false
-        %     otherwise.
-        %
-        % Notes
-        % -----
-        % Validation checks include:
-        %
-        % - presence of required properties
-        % - datatype consistency
-        % - shape and dimension consistency
-        % - enumeration membership
-        % - regular-expression conformance
-        % - satisfaction of or: choice groups
-        %
-        % Datasets containing unknown extra properties loaded from disk are
-        % considered invalid for normal write operations.
-            if nargin == 1
-                [property_data,property_dictionary] = escdf_dataset.get_specification_info(obj.dataset_type);
-            else
-                [property_data,~] = escdf_dataset.get_specification_info(obj.dataset_type);
-            end
-            if nargin < 3
+        %     otherwise when report is false. If report is true, return a
+        %     structured ValidationReport.
+            if nargin < 2
                 hide_issues = false;
             end
-            % Make it flexible enough to handle cell arrays too
-            if iscell(property_dictionary)
-                temp_property_dictionary = containers.Map();
-                for i = 1:length(property_dictionary)
-                    prop_data = property_dictionary{i};
-                    name = prop_data{1};
-                    temp_property_dictionary(name) = prop_data;
-                end
-                property_dictionary = temp_property_dictionary;
+            if nargin < 3
+                report = false;
             end
-            % This function will go through and check to make sure that
-            % everything that needs to be defined is defined, and that all
-            % dimensions are consistent.
-            variable_dimensions = containers.Map();
-            missing_properties = {};
-            invalid_choices = {};
-            bad_types = {};
-            bad_sizes = {};
-            invalid_enumerations = {};
-            invalid_regexes = {};
-            property_names = keys(property_dictionary);
-            isvalid = true;
-            for i = 1:length(property_names)
-                name = property_names{i};
-                property_info = property_dictionary(name);
-                if isa(property_info,'containers.Map')
-                    valid_choice = obj.find_valid_choice_specification(property_info);
-                    if length(valid_choice) < 1
-                        invalid_choices{end+1} = name;
-                        continue;
-                    end
-                    if length(valid_choice) > 1
-                        error('Determining bewteen multiple valid choices is not implemented yet!')
-                    end
-                    % Since we already satisfied, name, type, and size, we
-                    % should just only have to check that the names are
-                    % consistent.
-                    all_property_info = property_info(valid_choice{1});
-                    for k = 1:length(all_property_info)
-                        property_info = all_property_info{k};
-                        % Go through everything and make sure it makes sense
-                        property_name = property_info{1};
-                        property_size = property_info{3};
-                        property = obj.(property_name);
-                        current_property_size = property.get_size();
-                        for j = 1:length(property_size)
-                            this_size = property_size{j};
-                            this_current_size = current_property_size(j);
-                            if ischar(this_size)
-                                if ~isKey(variable_dimensions,this_size)
-                                    variable_dimensions(this_size) = {};
-                                end
-                                this_dimension_info = variable_dimensions(this_size);
-                                this_dimension_info{end+1} = {property_name,this_current_size};
-                                variable_dimensions(this_size) = this_dimension_info;
-                            else
-                                if this_size ~= this_current_size
-                                    bad_sizes{end+1} = {property_name,this_current_size,this_size,j};
-                                end
-                            end
-                        end
-                    end
-                else
-                    % Go through everything and make sure it makes sense
-                    property_name = property_info{1};
-                    property_type = property_info{2};
-                    property_size = property_info{3};
-                    property_options = property_info{4};
-                    % Extract the object
-                    property = obj.(property_name);
-                    if isempty(property) && ~any(strcmpi(property_options,'optional'))
-                        missing_properties{end+1} = property_name;
-                        continue
-                    elseif isempty(property) && any(strcmpi(property_options,'optional'))
-                        continue
-                    end
-                    % Check the type and size
-                    if ~strcmpi(property.get_format(),property_type)
-                        bad_types{end+1} = {property_name,property.get_format(),property_type};
-                        continue
-                    end
-                    current_property_size = property.get_size();
-                    if length(current_property_size) ~= length(property_size)
-                        bad_sizes{end+1} = {property_name, -1, -1, -1};
-                        continue
-                    end
-                    for j = 1:length(property_size)
-                        this_size = property_size{j};
-                        if length(current_property_size) < j
-                            bad_sizes{end+1} = {property_name, -1, this_size,j};
-                            break
-                        end
-                        this_current_size = current_property_size(j);
-                        if ischar(this_size)
-                            if ~isKey(variable_dimensions,this_size)
-                                variable_dimensions(this_size) = {};
-                            end
-                            this_dimension_info = variable_dimensions(this_size);
-                            this_dimension_info{end+1} = {property_name,this_current_size};
-                            variable_dimensions(this_size) = this_dimension_info;
-                        else
-                            if this_size ~= this_current_size
-                                bad_sizes{end+1} = {property_name,this_current_size,this_size,j};
-                            end
-                        end
-                    end
-                    % Check if the enumerations or regexes are satisfied (if
-                    % necessary)
-                    for j = 1:length(property_options)
-                        if strcmp(property_options{j}(1:5),'enum:')
-                            split_enum = strtrim(strsplit(property_options{j},':'));
-                            enum_name = split_enum{2};
-                            valid_values = property_data{6}(enum_name);
-                            enum_data = property(:);
-                            valid_enums = ismember(enum_data,valid_values);
-                            if ~all(valid_enums(:))
-                                invalid_enumerations{end+1} = {property_name,valid_values,unique(enum_data(~valid_enums))};
-                            end
-                        end
-                        if strcmp(property_options{j}(1:6),'regex:')
-                            split_regex = strtrim(strsplit(property_options{j},':'));
-                            pattern = split_regex{2};
-                            regex_data = property(:);
-                            matches = cellfun(@(x) ~isempty(regexp(x, pattern, 'once')), regex_data);
-                            if ~all(matches(:))
-                                invalid_regexes{end+1} = {property_name, unique(regex_data(~matches))};
-                            end
-                        end
-                    end
-                end
+
+            registry = escdf_dataset.specification_cache_state('get');
+
+            if isempty(registry)
+                escdf_dataset.reload_specification_cache();
+                registry = escdf_dataset.specification_cache_state('get');
             end
-            % Now make sure if everything is OK
-            if ~isempty(missing_properties)
-                isvalid = false;
-                for i = 1:length(missing_properties)
-                    missing_property = missing_properties{i};
-                    if ~hide_issues
-                        disp(['Required Property ',missing_property,' is missing.'])
-                    end
-                end
-            end
-            if ~isempty(invalid_choices)
-                isvalid = false;
-                for i = 1:length(invalid_choices)
-                    invalid_choice = invalid_choices{i};
-                    if ~hide_issues
-                        disp(['No valid choice for ',invalid_choice,'.'])
-                    end
-                end
-            end
-            if ~isempty(bad_types)
-                isvalid = false;
-                for i = 1:length(bad_types)
-                    bad_type = bad_types{i};
-                    prop_name = bad_type{1};
-                    prop_format = bad_type{2};
-                    desired_format = bad_type{3};
-                    if ~hide_issues
-                        disp(['Property ',prop_name,' has type ',prop_format,' when it should be ',desired_format])
-                    end
-                end
-            end
-            if ~isempty(bad_sizes)
-                isvalid = false;
-                for i = 1:length(bad_sizes)
-                    bad_size = bad_sizes{i};
-                    prop_name = bad_size{1};
-                    prop_size = bad_size{2};
-                    desired_size = bad_size{3};
-                    size_index = bad_size{4};
-                    if prop_size == -1 && desired_size == -1 && size_index == -1
-                        if ~hide_issues
-                            disp(['Property ',prop_name,' dimensionality does not match'])
-                        end
-                    elseif prop_size == -1
-                        if ~hide_issues
-                            disp(['Property ',prop_name,' dimension ',num2str(size_index),' does not exist'])
-                        end
-                    else
-                        if ~hide_issues
-                            disp(['Property ',prop_name,' dimension ',num2str(size_index),' has size ',prop_size,' when it should be ',desired_size])
-                        end
-                    end
-                end
-            end
-            if ~isempty(invalid_enumerations)
-                isvalid = false;
-                for i = 1:length(invalid_enumerations)
-                    invalid_enumeration = invalid_enumerations{i};
-                    prop_name = invalid_enumeration{1};
-                    valid_values = invalid_enumeration{2};
-                    bad_values = invalid_enumeration{3};
-                    if ~hide_issues
-                        disp(['Property ',prop_name,' has invalid values ',strjoin(bad_values,', '),'.  Values must be one of ',strjoin(valid_values,', ')])
-                    end
-                end
-            end
-            if ~isempty(invalid_regexes)
-                isvalid = false;
-                for i = 1:length(invalid_regexes)
-                    invalid_regex = invalid_regexes{i};
-                    prop_name = invalid_regex{1};
-                    bad_values = invalid_regex{2};
-                    if ~hide_issues
-                        disp(['Property ',prop_name,' has invalid values ',strjoin(bad_values,', '),'.']);
-                    end
-                end
-            end
-            % Now go through the variable sized properties and make sure
-            % they all match
-            variable_dimension_keys = keys(variable_dimensions);
-            for i = 1:length(variable_dimension_keys)
-                variable_dimension = variable_dimension_keys{i};
-                variable_dimension_data = variable_dimensions(variable_dimension);
-                lengths = zeros(length(variable_dimension_data),1);
-                for j = 1:length(variable_dimension_data)
-                    lengths(j) = variable_dimension_data{j}{2};
-                end
-                if ~all(lengths == lengths(1))
-                    isvalid = false;
-                    if ~hide_issues
-                        disp(['Dimension ',variable_dimension,' is inconsistent across properties.'])
-                        for j = 1:length(variable_dimension_data)
-                            disp(['  ',variable_dimension_data{j}{1},': ',num2str(variable_dimension_data{j}{2})])
-                        end
-                    end
-                end
-            end
-            if obj.has_modified_properties && nargin == 1
-                if ~hide_issues
-                    disp('Dataset has modified properties and therefore cannot be valid.')
-                end
-                isvalid = false;
+
+            resolved_specification = registry.resolve(obj.dataset_type);
+            validation_report = Validation.validate_dataset_against_resolved_specification( ...
+                obj, resolved_specification, hide_issues);
+
+            if report
+                out = validation_report;
+            else
+                out = validation_report.is_valid;
             end
         end
+
         function disp(obj)
             fprintf('%s\n\n',obj.repr())
         end
@@ -492,6 +303,7 @@ classdef escdf_dataset < handle & dynamicprops
                 end
             end
         end
+
         function read_into_memory(obj)
         % Load all dataset properties into memory.
         %
@@ -508,7 +320,9 @@ classdef escdf_dataset < handle & dynamicprops
                     property.read_into_memory();
                 end
             end
+            obj.backing_state = 'memory';
         end
+
         function write_to_disk(obj,hdf5_group_id)
         % Write the dataset to an HDF5 group.
         %
@@ -560,13 +374,25 @@ classdef escdf_dataset < handle & dynamicprops
             H5A.close(attr_id);
             H5T.close(str_type_id);
             H5S.close(attr_space_id);
+            obj.backing_state = 'hdf5_native';
+            obj.has_pending_changes = false;
         end
 
         function help(obj)
         % Display specification documentation for this dataset type.
-            [specification_info,~] = escdf_dataset.get_specification_info(obj.dataset_type);
-            disp(specification_info{2})
-            disp(specification_info{3})
+        %
+        % Notes
+        % -----
+        % Documentation is sourced from the canonical local specification.
+            registry = escdf_dataset.specification_cache_state('get');
+            if isempty(registry)
+                escdf_dataset.reload_specification_cache();
+                registry = escdf_dataset.specification_cache_state('get');
+            end
+
+            local_specification = registry.get_local(obj.dataset_type);
+            disp(local_specification.documentation)
+            disp(local_specification.notes)
         end
 
         function delete(obj)
@@ -591,16 +417,17 @@ classdef escdf_dataset < handle & dynamicprops
         % Returns
         % -------
         % supertype_list : cell array of char
-        %     Ordered list of this dataset type and its parent types up the
-        %     specification inheritance chain.
-            [specification_data, ~] = escdf_dataset.get_specification_info(obj.get_type());
-            supertype_list = {specification_data{1}};
-            parent = specification_data{4};
-            while ~strcmpi(parent,'none')
-                [specification_data, ~] = escdf_dataset.get_specification_info(parent);
-                supertype_list{end+1} = specification_data{1};
-                parent = specification_data{4};
+        %     Ordered list of specification names in canonical inheritance
+        %     application order, beginning with the root ancestor and
+        %     ending with this dataset type.
+            registry = escdf_dataset.specification_cache_state('get');
+            if isempty(registry)
+                escdf_dataset.reload_specification_cache();
+                registry = escdf_dataset.specification_cache_state('get');
             end
+
+            resolved_specification = registry.resolve(obj.get_type());
+            supertype_list = resolved_specification.ancestry;
         end
 
         function out = istype(obj,type)
@@ -684,39 +511,6 @@ classdef escdf_dataset < handle & dynamicprops
                 fclose(fid);
             end
         end
-        function dimension_names = get_dimension_names(obj)
-            dimension_names = {};
-            [~, property_dictionary] = escdf_dataset.get_specification_info(obj.get_type());
-            property_keys = keys(property_dictionary);
-            for i = 1:length(property_keys)
-                key = property_keys{i};
-                property_info = property_dictionary(key);
-                if isa(property_info,'containers.Map')
-                    option_keys = keys(property_info);
-                    for j = 1:length(option_keys)
-                        key = option_keys{j};
-                        option_properties = property_info(key);
-                        for k = 1:length(option_properties)
-                            property_data = option_properties{k};
-                            property_size = property_data{3};
-                            for l = 1:length(property_size)
-                                if ~isnumeric(property_size{l}) && ~any(strcmp(dimension_names,property_size{l}))
-                                    dimension_names{end+1} = property_size{l};
-                                end
-                            end
-                        end
-                    end
-                else
-                    property_data = property_info;
-                    property_size = property_data{3};
-                    for l = 1:length(property_size)
-                        if ~isnumeric(property_size{l}) && ~any(strcmp(dimension_names,property_size{l}))
-                            dimension_names{end+1} = property_size{l};
-                        end
-                    end
-                end
-            end
-        end
 
         function table_out = dump_to_table(obj,dimension_name,max_columns)
         % Convert selected dataset properties to a table.
@@ -737,88 +531,149 @@ classdef escdf_dataset < handle & dynamicprops
             if nargin < 3
                 max_columns = 10;
             end
-            % First we need to find all of the entries with that dimension
-            % name
-            [~, property_dictionary] = escdf_dataset.get_specification_info(obj.get_type());
-            property_dimension_info = {};
-            property_keys = keys(property_dictionary);
-            for i = 1:length(property_keys)
-                key = property_keys{i};
-                property_info = property_dictionary(key);
-                if isa(property_info,'containers.Map')
-                    option_keys = keys(property_info);
-                    for j = 1:length(option_keys)
-                        key = option_keys{j};
-                        option_properties = property_info(key);
-                        for k = 1:length(option_properties)
-                            property_data = option_properties{k};
-                            property_size = property_data{3};
-                            % Find matching dimension name
-                            dimension_matches = strcmp(property_size,dimension_name);
-                            if any(dimension_matches)
-                                property_dimension_info{end+1} = {property_data{1},property_data{2},property_data{3},property_data{4},dimension_matches};
-                            end
-                        end
-                    end
-                else
-                    property_data = property_info;
-                    property_size = property_data{3};
-                    % Find matching dimension name
-                    dimension_matches = strcmp(property_size,dimension_name);
-                    if any(dimension_matches)
-                        property_dimension_info{end+1} = {property_data{1},property_data{2},property_data{3},property_data{4},dimension_matches};
-                    end
-                end
+
+            registry = escdf_dataset.specification_cache_state('get');
+            if isempty(registry)
+                escdf_dataset.reload_specification_cache();
+                registry = escdf_dataset.specification_cache_state('get');
             end
-            % Now we need to parse through and create the table
-            column_names = {};
-            data_array = {};
-            for i = 1:length(property_dimension_info)
-                name = property_dimension_info{i}{1};
-                type = property_dimension_info{i}{2};
-                dimension_names = property_dimension_info{i}{3};
-                options = property_dimension_info{i}{4};
-                dimension_match = find(property_dimension_info{i}{5},1);
-                dimension_not_match = 1:length(dimension_names);
-                dimension_not_match(dimension_match) = [];
-                property = obj.(name);
+
+            resolved_specification = registry.resolve(obj.get_type());
+
+            % Build a mapping from property name to a unique compatible
+            % canonical definition that includes the requested dimension.
+            compatible_dimension_info = {};
+
+            property_names = resolved_specification.property_names;
+            for i = 1:length(property_names)
+                property_name = property_names{i};
+                property = obj.(property_name);
                 if isempty(property)
                     continue
                 end
-                if ~obj.validate({{name,type,dimension_names,options}},true)
+
+                property_definitions = resolved_specification.properties_by_name(property_name);
+
+                matching_definitions = {};
+                for j = 1:length(property_definitions)
+                    property_definition = property_definitions(j);
+                    shape = property_definition.shape;
+
+                    dimension_matches = false(1, length(shape));
+                    for k = 1:length(shape)
+                        dim = shape(k);
+                        if dim.is_symbolic() && strcmp(dim.value, dimension_name)
+                            dimension_matches(k) = true;
+                        end
+                    end
+
+                    if ~any(dimension_matches)
+                        continue
+                    end
+
+                    if ~escdf_dataset.check_if_property_is_acceptable(property_definition, property)
+                        continue
+                    end
+
+                    matching_definitions{end+1} = {property_definition, dimension_matches}; %#ok<AGROW>
+                end
+
+                if length(matching_definitions) == 1
+                    compatible_dimension_info{end+1} = ...
+                        {property_name, matching_definitions{1}{1}, matching_definitions{1}{2}}; %#ok<AGROW>
+                end
+            end
+
+            column_names = {};
+            data_array = {};
+
+            for i = 1:length(compatible_dimension_info)
+                property_name = compatible_dimension_info{i}{1};
+                property_definition = compatible_dimension_info{i}{2};
+                dimension_matches = compatible_dimension_info{i}{3};
+
+                property = obj.(property_name);
+                full_data = property(:);
+
+                matched_dimension_index = find(dimension_matches, 1);
+                full_shape = size(full_data);
+
+                % Ensure full_shape has as many entries as canonical rank
+                if length(full_shape) < length(property_definition.shape)
+                    full_shape = [full_shape, ones(1, length(property_definition.shape) - length(full_shape))];
+                end
+
+                unmatched_dimension_indices = setdiff(1:length(property_definition.shape), matched_dimension_index);
+
+                if isempty(unmatched_dimension_indices)
+                    % Scalar/vector case where the requested dimension is the
+                    % only dimension.
+                    slice_indices = repmat({':'}, 1, length(property_definition.shape));
+                    slice = full_data(slice_indices{:});
+                    data_array{end+1} = slice(:); %#ok<AGROW>
+
+                    index_string = repmat({''}, 1, length(property_definition.shape));
+                    index_string{matched_dimension_index} = ':';
+                    column_name = [property_name, '(', strjoin(index_string, ','), ')'];
+                    column_names{end+1} = column_name; %#ok<AGROW>
                     continue
                 end
-                data = escdf_dataset.moveaxis(property(:),dimension_match,1);
-                % Now we need to iterate over all dimension but the first
-                indices = cell(1,length(dimension_names));
-                sz = size(data);
-                for j = 1:prod(sz(2:end))
-                    size_array = sz(2:end);
-                    dim = length(size_array);
-                    if dim < 2
-                        size_array = [size_array,1];
+
+                remaining_sizes = full_shape(unmatched_dimension_indices);
+                n_remaining = prod(remaining_sizes);
+
+                for j = 1:n_remaining
+                    fixed_index_values = cell(1, numel(unmatched_dimension_indices));
+
+                    if numel(remaining_sizes) == 1
+                        fixed_index_values{1} = j;
+                    else
+                        [fixed_index_values{:}] = ind2sub(remaining_sizes, j);
                     end
-                    [indices{2:end}] = ind2sub(size_array,j);
-                    indices{1} = ':';
-                    slice = data(indices{:});
-                    index_string = cell(1,length(dimension_names));
-                    index_string{dimension_match} = ':';
-                    index_string(dimension_not_match) = indices(2:end);
-                    column_name = [name,'(',strjoin(cellfun(@num2str, index_string,'UniformOutput',false),','),')'];
-                    data_array{end+1} = slice;
-                    column_names{end+1} = column_name;
+
+                    slice_indices = cell(1, length(property_definition.shape));
+                    for k = 1:length(slice_indices)
+                        slice_indices{k} = 1;
+                    end
+                    slice_indices{matched_dimension_index} = ':';
+                    for k = 1:numel(unmatched_dimension_indices)
+                        slice_indices{unmatched_dimension_indices(k)} = fixed_index_values{k};
+                    end
+
+                    slice = full_data(slice_indices{:});
+                    data_array{end+1} = slice(:); %#ok<AGROW>
+
+                    index_string = cell(1, length(property_definition.shape));
+                    for k = 1:length(index_string)
+                        index_string{k} = '';
+                    end
+                    index_string{matched_dimension_index} = ':';
+                    for k = 1:numel(unmatched_dimension_indices)
+                        index_string{unmatched_dimension_indices(k)} = num2str(fixed_index_values{k});
+                    end
+
+                    column_name = [property_name, '(', strjoin(index_string, ','), ')'];
+                    column_names{end+1} = column_name; %#ok<AGROW>
+
                     if j >= max_columns
                         break
                     end
                 end
             end
-            % Go through and make sure everything is the correct shape
-            lengths = cellfun(@length,data_array);
+
+            if isempty(data_array)
+                table_out = table();
+                return
+            end
+
+            lengths = cellfun(@length, data_array);
             most_common_length = mode(lengths);
-            inds_to_keep = lengths==most_common_length;
+            inds_to_keep = lengths == most_common_length;
+
             column_names = column_names(inds_to_keep);
             data_array = data_array(inds_to_keep);
-            table_out = table(data_array{:},'VariableNames',column_names);
+
+            table_out = table(data_array{:}, 'VariableNames', column_names);
         end
 
         function out = dump_to_struct(obj)
@@ -845,310 +700,86 @@ classdef escdf_dataset < handle & dynamicprops
         end
     end
     methods (Access = public, Static)
-        function [specification_data, property_dictionary] = get_specification_info(specification_name, force_reload)
-        % Return parsed specification information for a dataset type.
-        %
-        % Parameters
-        % ----------
-        % specification_name : char
-        %     Specification name to retrieve.
-        % force_reload : logical, optional
-        %     If true, force the specification cache to be rebuilt from the
-        %     specification files.
-        %
-        % Returns
-        % -------
-        % specification_data : cell
-        %     Parsed specification metadata.
-        % property_dictionary : containers.Map
-        %     Property-definition mapping for the requested
-        %     specification.
-            if nargin < 2
-                force_reload = false;
-            end
-            persistent all_specification_data
-            persistent all_property_dictionaries
-            if isempty(all_specification_data) || force_reload
-                if escdf_dataset.VERBOSE
-                    disp('Parsing ESCDF Specification Files')
-                end
-                mfile_path = mfilename('fullpath');
-                [path,~,~] = fileparts(mfile_path);
-                specification_folder = fullfile(path,'specifications','*.txt');
-                specification_files = dir(specification_folder);
-                specification_files = {specification_files.name};
-                all_specification_data = containers.Map();
-                all_property_dictionaries = containers.Map();
-                local_property_dictionaries = containers.Map();
-                local_specification_data = containers.Map();
-                for i = 1:length(specification_files)
-                    file = specification_files{i};
-                    file_path = fullfile(path,'specifications',strip(file));
-                    [name, documentation, extra_documentation, parent_class, properties, enumerations, version] = escdf_dataset.parse_specification_file(file_path,escdf_dataset.VERBOSE);
-                    local_specification_data(name) = {name, documentation, extra_documentation, parent_class, properties, enumerations, version};
-                    local_property_dictionaries(name) = escdf_dataset.create_property_dictionary(properties);
-                end
-                % Now we want to go back through and get all of the
-                % properties of all of the parent classes
-                keysArray = keys(local_property_dictionaries);
-                for i = 1:length(keysArray)
-                    name = keysArray{i};
-                    local_properties = {local_property_dictionaries(name)};
-                    original_local_data = local_specification_data(name);
-                    parent = original_local_data{4};
-                    local_enumerations = {original_local_data{6}};
-                    while ~strcmpi(parent,'none')
-                        key = parent;
-                        local_properties{end+1} = local_property_dictionaries(key);
-                        local_data = local_specification_data(key);
-                        parent = local_data{4};
-                        local_enumerations{end+1} = local_data{6};
-                    end
-                    % Flip the order
-                    local_properties = local_properties(end:-1:1);
-                    local_enumerations = local_enumerations(end:-1:1);
-                    local_property_dictionary = containers.Map();
-                    local_enumeration_dictionary = containers.Map();
-                    for j = 1:length(local_properties)
-                        prop_dict = local_properties{j};
-                        enum_dict = local_enumerations{j};
-                        properties = keys(prop_dict);
-                        for k = 1:length(properties)
-                            key = properties{k};
-                            if escdf_dataset.VERBOSE
-                                disp(['Adding Property ',key,' to Dataset ',name])
-                            end
-                            val = prop_dict(key);
-                            local_property_dictionary(key) = val;
-                        end
-                        enums = keys(enum_dict);
-                        for k = 1:length(enums)
-                            key = enums{k};
-                            if escdf_dataset.VERBOSE
-                                disp(['Adding Enumeration ',key,' to Dataset ',name])
-                            end
-                            val = enum_dict(key);
-                            local_enumeration_dictionary(key) = val;
-                        end
-                    end
-                    all_property_dictionaries(name) = local_property_dictionary;
-                    all_specification_data(name) = [original_local_data(1:5),{local_enumeration_dictionary},original_local_data(7:end)];
-                end
-            end
-            specification_data = all_specification_data(specification_name);
-            property_dictionary = all_property_dictionaries(specification_name);
-        end
 
         function reload_specification_cache()
-        % Force re-parse of specification files.
+        % Reset specification state back to the packaged ESCDF defaults.
         %
         % Notes
         % -----
-        % This rebuilds the persistent specification cache so that newly
-        % created or modified specification files are visible immediately.
-            escdf_dataset.get_specification_info('parameter_set', true);
+        % This discards any appended specification directories and rebuilds
+        % the persistent canonical specification registry from the packaged
+        % ESCDF specification directory only.
+            registry = SpecificationRegistry.build_default_registry();
+            escdf_dataset.specification_cache_state('set', registry);
         end
 
-        function [name, documentation, extra_documentation, parent_class, properties, enumerations, version] = parse_specification_file(specification_file, verbose)
-            acceptable_datatypes = {'i1','i2','i4','i8','f4','f8','c8','c16', 'u1','u2','u4','u8','str','bytes'};
-            if nargin < 2
-                verbose = false;
+        function load_specification_directory(directory)
+        % Append specification files from an additional directory to the
+        % cached specification registry.
+        %
+        % Parameters
+        % ----------
+        % directory : char
+        %     Directory containing additional ESCDF specification files.
+        %
+        % Notes
+        % -----
+        % This method is primarily intended for tests or specialized
+        % workflows that need to extend the active specification set
+        % without modifying the packaged ESCDF specifications.
+            if ~(ischar(directory) || isstring(directory))
+                error('directory must be a string.');
             end
-            %% Load in the file
-            if verbose
-                fprintf('Parsing %s\n', specification_file);
-            end
-            fid = fopen(specification_file, 'r');
-            lines = textscan(fid, '%s', 'Delimiter', '\n');
-            lines = lines{1};
-            fclose(fid);
-            %% Parse the Name
-            line_parts = strsplit(lines{1},'-');
-            name_part = line_parts{1};
-            version_part = line_parts{2};
-            name = strrep(strtrim(name_part), ' ', '_');
-            version_parts = strsplit(strrep(version_part,'v',''),'.');
-            major = str2double(version_parts{1});
-            minor = str2double(version_parts{2});
-            hotfix = str2double(version_parts{3});
-            version = [major,minor,hotfix];
-            if verbose
-                fprintf('  Name %s\n', name);
-                fprintf('  Version %d.%d.%d\n', major,minor,hotfix);
-            end
-            %% Find the extends line
-            extends_line = find(cellfun(@(x) length(x) >= 8 && strcmp(x(1:8), 'extends:'), lines), 1);
-            parent_class = strtrim(strsplit(lines{extends_line}, ':'));
-            parent_class = parent_class{2};
-            if verbose
-                fprintf('  Found Parent Class %s at line %d\n', parent_class, extends_line);
-            end
-            %% Find the properties section
-            properties_line = find(cellfun(@(x) strcmp(strtrim(x), 'properties'), lines), 1);
-            if verbose
-                fprintf('  Found Properties Header at Line %d\n', properties_line);
-            end
-            properties = {};
-            for i = properties_line+2:length(lines)
-                line = strtrim(lines{i});
-                if isempty(line)
-                    break;
-                end
-                if verbose
-                    fprintf('  Found Property at Line %d\n', i);
-                end
-                property_info = strtrim(strsplit(line, '-'));
-                % If there are any -'s in the options, it will have gotten
-                % split apart, so let's recompile the options.
-                property_info(4) = {strjoin(property_info(4:end),'-')};
-                property_info = property_info(1:4);
-                property_name = property_info{1};
-                if verbose
-                    fprintf('    Name: %s\n', property_name);
-                end
-                property_type = property_info{2};
-                if ~ismember(property_type, acceptable_datatypes)
-                    error('In file %s variable %s, %s is not a valid type. Must be one of %s', specification_file, property_name, property_type, strjoin(acceptable_datatypes, ', '));
-                end
-                if verbose
-                    fprintf('    Type: %s\n', property_type);
-                end
-                try
-                    if strcmp(property_info{3}, 'scalar')
-                        property_shape = {};
-                    else
-                        property_shape = strsplit(property_info{3}, ',');
-                    end
-                catch
-                    property_shape = {};
-                end
-                if verbose
-                    fprintf('    Shape: %s\n', string(property_shape));
-                end
-                for j = 1:length(property_shape)
-                    try
-                        shape = str2double(property_shape{j});
-                        if isnan(shape)
-                            property_shape{j} = strtrim(property_shape{j});
-                        else
-                            property_shape{j} = shape;
-                        end
-                    catch
-                        property_shape{j} = strtrim(property_shape{j});
-                    end
-                end
-                try
-                    if isempty(property_info{4})
-                        property_options = {};
-                    else
-                        property_options = strtrim(strsplit(property_info{4}, ','));
-                        % If there is "regex" in any of them, we need to join
-                        % with the rest, because it could have a , in it which
-                        % would split up one property into multiple
-                        regex_found = find(contains(property_options,'regex:'),1);
-                        if ~isempty(regex_found)
-                            property_options(regex_found) = {strjoin(property_options(regex_found:end),',')};
-                            property_options = property_options(1:regex_found);
-                        end
-                    end
-                catch
-                    property_options = {};
-                end
-                if verbose
-                    fprintf('    Options: %s\n', strjoin(property_options, ', '));
-                end
-                properties{end+1} = {property_name, property_type, property_shape, property_options};
-            end
-            %% Find the Enumerations section if it exists
-            enumerations_line = find(cellfun(@(x) strcmp(strtrim(x), 'enumerations'), lines), 1);
-            enumerations = containers.Map();
-            if isempty(enumerations_line)
-                if verbose
-                    fprintf('  No Enumerations Found\n');
-                end
-            else
-                if verbose
-                    fprintf('  Found Enumeration Header at Line %d\n', enumerations_line);
-                end
-                for i = enumerations_line+2:length(lines)
-                    line = strtrim(lines{i});
-                    if isempty(line)
-                        break;
-                    end
-                    if verbose
-                        fprintf('  Found Enumeration at Line %d\n', i);
-                    end
-                    enumeration_info = strtrim(strsplit(line, '-'));
-                    enumeration_name = enumeration_info{1};
-                    if verbose
-                        fprintf('    Name: %s\n', enumeration_name);
-                    end
-                    enumeration_values = strtrim(strsplit(strjoin(enumeration_info(2:end),'-'), ','));
-                    if verbose
-                        fprintf('    Values: %s\n', strjoin(enumeration_values,', '));
-                    end
-                    enumerations(enumeration_name) = enumeration_values;
-                end
+            directory = char(string(directory));
+
+            registry = escdf_dataset.specification_cache_state('get');
+
+            if isempty(registry)
+                registry = SpecificationRegistry.build_default_registry();
             end
 
-            %% Grab the documentation
-            documentation = strjoin(lines(extends_line+1:properties_line-1), '\n');
-            if verbose
-                fprintf('  Documentation\n');
-                fprintf('%s\n', documentation);
-            end
-            extra_documentation = strjoin(lines(i+1:end), '\n');
-            if verbose
-                fprintf('  Extra Documentation\n');
-                fprintf('%s\n', extra_documentation);
-            end
+            registry.load_from_directory(directory);
+            escdf_dataset.specification_cache_state('set', registry);
         end
 
-        function output_dict = create_property_dictionary(properties)
-            output_dict = containers.Map();
-            for i = 1:length(properties)
-                property_name = properties{i}{1};
-                property_type = properties{i}{2};
-                property_shape = properties{i}{3};
-                property_options = properties{i}{4};
-                is_option = false;
-                % Parse the options:
-                if ~isempty(property_options)
-                    % Loop through and see if it's an "or"
-                    for j = 1:length(property_options)
-                        option = property_options{j};
-                        if startsWith(option, 'or:')
-                            parts = strsplit(option, ':');
-                            option_name = parts{2};
-                            option_choice = parts{3};
-                            if ~isKey(output_dict, option_name)
-                                output_dict(option_name) = containers.Map();
-                            end
-                            if ~isKey(output_dict(option_name), option_choice)
-                                key = output_dict(option_name);
-                                key(option_choice) = {};
-                                output_dict(option_name) = key;
-                            end
-                            output_properties = property_options(~startsWith(property_options, 'or:'));
-                            if isempty(output_properties)
-                                output_properties = {};
-                            end
-                            key = output_dict(option_name);
-                            current_list = key(option_choice);
-                            current_list{end+1} = {property_name, property_type, property_shape, output_properties};
-                            key(option_choice) = current_list;
-                            output_dict(option_name) = key;
-                            is_option = true;
-                            break;
-                        end
-                    end
-                    if is_option
-                        continue;
-                    end
-                end
-                output_dict(property_name) = {property_name, property_type, property_shape, property_options};
+        function registry_cache = specification_cache_state(action, varargin)
+        % Manage shared cached canonical specification registry state.
+        %
+        % Parameters
+        % ----------
+        % action : char
+        %     Cache action. Supported values are:
+        %     - 'get'
+        %     - 'set'
+        %     - 'clear'
+        %
+        % Returns
+        % -------
+        % registry_cache : SpecificationRegistry or []
+        %     Cached canonical specification registry.
+            persistent cached_registry
+
+            if nargin < 1
+                action = 'get';
             end
+
+            switch lower(action)
+                case 'get'
+                    % no-op, just return current value
+
+                case 'set'
+                    cached_registry = varargin{1};
+
+                case 'clear'
+                    cached_registry = [];
+
+                otherwise
+                    error('Unknown specification cache action "%s".', action);
+            end
+
+            registry_cache = cached_registry;
         end
+
         function out = check_hdf5_dataset(id)
             id_type = H5I.get_type(id);
             try
@@ -1176,114 +807,160 @@ classdef escdf_dataset < handle & dynamicprops
             end
         end
 
-        function isacceptable = check_if_property_is_acceptable(acceptable_specifications, property)
+        function isacceptable = check_if_property_is_acceptable(acceptable_property_definitions, property)
+        % Return whether a property matches one of the acceptable canonical
+        % property definitions.
+        %
+        % Parameters
+        % ----------
+        % acceptable_property_definitions : PropertyDefinition array
+        %     Canonical candidate property definitions.
+        % property : escdf_property
+        %     Property to check.
+        %
+        % Returns
+        % -------
+        % isacceptable : logical
+        %     True if the property matches at least one acceptable
+        %     canonical property definition.
             isacceptable = false;
-            for i = 1:length(acceptable_specifications)
-                acceptable_specification = acceptable_specifications{i};
-                name = acceptable_specification{1};
-                format = acceptable_specification{2};
-                size = acceptable_specification{3};
-                ragged = ismember('variable_length',acceptable_specification{4});
+            for i = 1:length(acceptable_property_definitions)
+                property_definition = acceptable_property_definitions(i);
+
                 % Check that the names are the same
-                if ~strcmp(name,property.get_name())
-                    % If they aren't, we can directly go to the next
-                    % specification.
+                if ~strcmp(property_definition.name, property.get_name())
                     continue
                 end
+
                 % Check if the formats are the same
-                if ~strcmp(format,property.get_format())
-                    % If they don't match, go to the next specification
+                if ~strcmp(property_definition.datatype, property.get_format())
                     continue
                 end
-                % Check if they are both ragged
-                if ragged ~= property.isragged()
+
+                % Check ragged setting
+                if property_definition.variable_length ~= property.isragged()
                     continue
                 end
+
                 % Check if the sizes are the same (or at least consistent)
                 actual_size = property.get_size();
-                if length(size) ~= length(actual_size)
+                shape = property_definition.shape;
+
+                if length(shape) ~= length(actual_size)
                     continue
                 end
 
                 all_sizes_match = true;
-                for j = 1:length(size)
-                    acceptable_size = size{j};
-                    if ischar(acceptable_size)
-                        % Here we won't check if the size is variable.
+                for j = 1:length(shape)
+                    dimension_definition = shape(j);
+                    if dimension_definition.is_symbolic()
                         continue
                     else
-                        if acceptable_size ~= actual_size(j)
+                        if dimension_definition.value ~= actual_size(j)
                             all_sizes_match = false;
                             break
                         end
                     end
                 end
+
                 if ~all_sizes_match
                     continue
                 end
-                % If we get to this point, then we match all of the
-                % parameters so we are good to go.
+
+                % If we get to this point, then we match all parameters.
                 isacceptable = true;
                 break
             end
         end
 
-        function property = build_property_from_array(name,acceptable_specifications,array)
-            % Here we will go through and basically build a property
-            % for each one and see which fits the best.
-            preferred_type_order = {'u1','u2','u4','u8','i1','i2','i4','i8',...
+        function property = build_property_from_array(name, acceptable_property_definitions, array)
+        % Build an escdf_property from array-like input using canonical
+        % property-definition candidates.
+        %
+        % Parameters
+        % ----------
+        % name : char
+        %     Property name.
+        % acceptable_property_definitions : PropertyDefinition array
+        %     Canonical candidate property definitions for this property.
+        % array : array-like
+        %     Input data to convert into an escdf_property.
+        %
+        % Returns
+        % -------
+        % property : escdf_property
+        %     Property object matching the best acceptable canonical
+        %     definition.
+        %
+        % Raises
+        % ------
+        % error
+        %     Raised if no acceptable property can be constructed from the
+        %     supplied data.
+            preferred_type_order = {'u1','u2','u4','u8','i1','i2','i4','i8', ...
                 'f4','f8','c8','c16','str','bytes'};
-            % We will collect properties and score them based on our
-            % preferences.
+
             all_properties = {};
-            % We will prefer smaller numbers of dimensions
             dimension_scores = [];
-            % We will prefer smaller datatypes
             type_scores = [];
-            for j = 1:length(acceptable_specifications)
-                property_data = acceptable_specifications{j};
+
+            for j = 1:length(acceptable_property_definitions)
+                property_definition = acceptable_property_definitions(j);
+
                 sizes = [];
-                if isempty(property_data{3})
+                shape = property_definition.shape;
+
+                if isempty(shape)
                     size_name = 'scalar';
                 else
-                    size_name = strjoin(cellfun(@num2str,property_data{3},'UniformOutput',false),',');
-                    for i = 1:length(property_data{3})
-                        if isnumeric(property_data{3}{i})
-                            sizes(end+1) = property_data{3}{i};
+                    size_name = strjoin(arrayfun(@char, shape, 'UniformOutput', false), ',');
+                    for i = 1:length(shape)
+                        dimension_definition = shape(i);
+                        if dimension_definition.is_fixed()
+                            sizes(end+1) = dimension_definition.value; %#ok<AGROW>
                         else
                             data_size = size(array);
                             if i > length(data_size)
-                                sizes(end+1) = 1;
+                                sizes(end+1) = 1; %#ok<AGROW>
                             else
-                                sizes(end+1) = data_size(i);
+                                sizes(end+1) = data_size(i); %#ok<AGROW>
                             end
                         end
                     end
                 end
+
                 if escdf_dataset.VERBOSE
                     disp(['Name: ',name])
-                    disp(['Type: ',property_data{2}])
+                    disp(['Type: ',property_definition.datatype])
                     disp(['Size: ',size_name,' (',num2str(sizes),')'])
-                    disp(['Options: ',strjoin(property_data{4})])
+                    disp(['Optional: ',num2str(property_definition.optional)])
+                    disp(['Variable Length: ',num2str(property_definition.variable_length)])
                 end
-                property = escdf_property(name,property_data{2},sizes,'ragged',ismember('variable_length',property_data{4}));
+
+                property = escdf_property( ...
+                    name, ...
+                    property_definition.datatype, ...
+                    sizes, ...
+                    'ragged', property_definition.variable_length);
+
                 try
                     property(:) = array;
                 catch
                     continue
                 end
-                % Now we need to check if the data has been preserved.  If
-                % it hasn't, then that is not a good datatype.
-                if isequal(property.get_data(),array) || (length(acceptable_specifications) == 1)
-                    all_properties{end+1} = property;
-                    dimension_scores(end+1) = length(property.get_size());
-                    type_scores(end+1) = find(strcmp(preferred_type_order,property.get_format()));
+
+                if isequal(property.get_data(), array) || (length(acceptable_property_definitions) == 1)
+                    all_properties{end+1} = property; %#ok<AGROW>
+                    dimension_scores(end+1) = length(property.get_size()); %#ok<AGROW>
+                    type_scores(end+1) = find(strcmp(preferred_type_order, property.get_format())); %#ok<AGROW>
                 end
             end
-            if length(all_properties) < 1
+
+            if isempty(all_properties)
                 error(['Could not build a escdf_property ',name,' to match the requested specifications.'])
             end
-            [~,min_index] = min(dimension_scores+type_scores*10);
+
+            [~, min_index] = min(dimension_scores + type_scores * 10);
             property = all_properties{min_index};
         end
 
@@ -1314,37 +991,15 @@ classdef escdf_dataset < handle & dynamicprops
                 obj.(['DO_NOT_USE_',name]) = [];
                 return
             end
-            % First let's find all of the options that it could be.
-            [specification_data, property_dictionary] = escdf_dataset.get_specification_info(obj.dataset_type);
-            % First let's see if it's just a regular old key
-            property_data = {};
-            try
-                this_property_data = property_dictionary(name);
-                if ~isa(this_property_data,'containers.Map')
-                    property_data{end+1} = this_property_data;
-                end
-            end
-            % If we didn't find it, we'll have to look through all of the
-            % options.
-            if isempty(property_data)
-                property_keys = keys(property_dictionary);
-                for i = 1:length(property_keys)
-                    property_key = property_keys{i};
-                    this_property_data = property_dictionary(property_key);
-                    if isa(this_property_data,'containers.Map')
-                        % Look through all of the properties
-                        option_keys = keys(this_property_data);
-                        for j = 1:length(option_keys)
-                            option_key = option_keys{j};
-                            option_properties = this_property_data(option_key);
-                            for k = 1:length(option_properties)
-                                this_property = option_properties{k};
-                                if strcmpi(this_property{1},name)
-                                    property_data{end+1} = this_property;
-                                end
-                            end
-                        end
-                    end
+            % Find all canonical property-definition candidates for this
+            % property name.
+            property_definitions = escdf_dataset.get_candidate_property_definitions( ...
+                obj.dataset_type, name);
+
+            if isempty(property_definitions)
+                current_properties = properties(obj);
+                if ~ismember(name, current_properties)
+                    error(['Assigned property ',name,' is not a valid property name for dataset type ',obj.dataset_type])
                 end
             end
 
@@ -1368,13 +1023,16 @@ classdef escdf_dataset < handle & dynamicprops
                 catch
                     % If it fails, then that means that we have to
                     % construct a property from an array.
-                    this_property = escdf_dataset.build_property_from_array(name,property_data,val);
+                    this_property = escdf_dataset.build_property_from_array(name, property_definitions, val);
                 end
             end
-            if ~escdf_dataset.check_if_property_is_acceptable(property_data,this_property)
-                error(['Assigned property is not consistent with the specification for ',name])
+            if ~isempty(property_definitions)
+                if ~escdf_dataset.check_if_property_is_acceptable(property_definitions, this_property)
+                    error(['Assigned property is not consistent with the specification for ',name])
+                end
             end
             obj.(['DO_NOT_USE_',name]) = this_property;
+            obj.has_pending_changes = true;
         end
 
         function val = get_dynamic_prop(name,obj)
@@ -1463,12 +1121,18 @@ classdef escdf_dataset < handle & dynamicprops
                 disp(['Type of the Group: ',data_type])
             end
             % Make sure that it is a known type.
-            try
-                [sd, pd] = escdf_dataset.get_specification_info(data_type);
-            catch
+            registry = escdf_dataset.specification_cache_state('get');
+            if isempty(registry)
+                escdf_dataset.reload_specification_cache();
+                registry = escdf_dataset.specification_cache_state('get');
+            end
+
+            if ~registry.has_local(data_type)
                 warning(sprintf('Dataset %s has an undefined type %s and will be written to an unknown dataset.',name,data_type))
                 original_data_type = data_type;
                 data_type = 'unknown';
+            else
+                original_data_type = [];
             end
             try
                 descriptive_name_attribute_id = H5A.open(group_id,'_descriptive_name');
@@ -1524,6 +1188,8 @@ classdef escdf_dataset < handle & dynamicprops
                 addprop(obj,extra_dataset);
                 obj.(extra_dataset) = prop;
             end
+            obj.backing_state = 'hdf5_native';
+            obj.has_pending_changes = false;
         end
 
         function datasets = get_group_datasets(group_id)
@@ -1666,6 +1332,38 @@ classdef escdf_dataset < handle & dynamicprops
             [out_channels{:}] = ndgrid(unflat_data_struct.channel{:});
             flat_channels = cellfun(@(x)reshape(x,[],1),out_channels,'UniformOutput',false);
             obj.channel = [flat_channels{:}];
+        end
+    end
+
+    methods (Access=private, Static)
+        function property_definitions = get_candidate_property_definitions(dataset_type, property_name)
+        % Return canonical property-definition candidates for a property name.
+        %
+        % Parameters
+        % ----------
+        % dataset_type : char
+        %     Dataset specification type.
+        % property_name : char
+        %     Property name to resolve.
+        %
+        % Returns
+        % -------
+        % property_definitions : PropertyDefinition array
+        %     Canonical candidate property definitions for the requested
+        %     name.
+            registry = escdf_dataset.specification_cache_state('get');
+            if isempty(registry)
+                escdf_dataset.reload_specification_cache();
+                registry = escdf_dataset.specification_cache_state('get');
+            end
+
+            resolved_specification = registry.resolve(dataset_type);
+
+            if isKey(resolved_specification.properties_by_name, property_name)
+                property_definitions = resolved_specification.properties_by_name(property_name);
+            else
+                property_definitions = PropertyDefinition.empty(1,0);
+            end
         end
     end
 end

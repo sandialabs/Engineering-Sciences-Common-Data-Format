@@ -182,3 +182,69 @@ def test_storage_and_recall(hdf5_file_path, data_type, data_shape, stride, in_me
     assert prop.in_memory
 
     hdf5_file.close()
+
+
+def test_new_in_memory_property_starts_memory_backed():
+    prop = escdf.Property("p1", "f8", (3,))
+    assert prop.backing_state == "memory"
+    assert prop.in_memory is True
+
+
+def test_new_hdf5_property_starts_hdf5_native(hdf5_file_path):
+    hdf5_file = h5py.File(hdf5_file_path, "r+")
+    prop = escdf.Property("p1", "f8", (3,), hdf5group=hdf5_file)
+    assert prop.backing_state == "hdf5_native"
+    assert prop.in_memory is False
+    hdf5_file.close()
+
+
+def test_loaded_property_starts_hdf5_native(hdf5_file_path):
+    hdf5_file = h5py.File(hdf5_file_path, "r+")
+    prop = escdf.Property("p1", "f8", (3,), hdf5group=hdf5_file)
+    prop[...] = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+
+    loaded = escdf.Property.load(h5_dataset=prop.h5_dataset)
+    assert loaded.backing_state == "hdf5_native"
+    assert loaded.in_memory is False
+    hdf5_file.close()
+
+
+def test_read_into_memory_sets_backing_state_to_memory(hdf5_file_path):
+    hdf5_file = h5py.File(hdf5_file_path, "r+")
+    prop = escdf.Property("p1", "f8", (3,), hdf5group=hdf5_file)
+    prop[...] = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+
+    prop.read_into_memory()
+
+    assert prop.backing_state == "memory"
+    assert prop.in_memory is True
+    np.testing.assert_allclose(prop[...], np.array([1.0, 2.0, 3.0]))
+    hdf5_file.close()
+
+
+def test_mark_external_backing_sets_external_state(hdf5_file_path):
+    hdf5_file = h5py.File(hdf5_file_path, "r+")
+    prop = escdf.Property("p1", "f8", (3,), hdf5group=hdf5_file)
+
+    prop.mark_external_backing()
+
+    assert prop.backing_state == "hdf5_external"
+    assert prop.in_memory is False
+    hdf5_file.close()
+
+
+def test_assignment_to_external_backed_property_materializes_to_memory(hdf5_file_path):
+    hdf5_file = h5py.File(hdf5_file_path, "r+")
+    prop = escdf.Property("p1", "f8", (3,), hdf5group=hdf5_file)
+    prop[...] = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+
+    prop.mark_external_backing()
+    assert prop.backing_state == "hdf5_external"
+    assert prop.in_memory is False
+
+    prop[...] = np.array([10.0, 20.0, 30.0], dtype=np.float64)
+
+    assert prop.backing_state == "memory"
+    assert prop.in_memory is True
+    np.testing.assert_allclose(prop[...], np.array([10.0, 20.0, 30.0]))
+    hdf5_file.close()

@@ -43,6 +43,7 @@ classdef escdf_property < handle
         ragged
         h5d_id
         h5type_id
+        backing_state
     end
 
     methods
@@ -75,6 +76,7 @@ classdef escdf_property < handle
             obj.size = size;
             obj.inmemory = true;
             obj.ragged = false;
+            obj.backing_state = 'memory';
             data = missing;
             h5g_id = missing;
             obj.h5d_id = missing;
@@ -114,6 +116,7 @@ classdef escdf_property < handle
                 H5A.close(attr_id);
                 H5T.close(str_type_id);
                 H5S.close(attr_space_id);
+                obj.backing_state = 'hdf5_native';
             end
 
             if obj.inmemory
@@ -210,7 +213,7 @@ classdef escdf_property < handle
                         end
                     end
                 case '.'
-                    varargout{1} = builtin('subsref', obj, S);
+                    [varargout{1:nargout}] = builtin('subsref', obj, S);
                 otherwise
                     error(['Unsupported indexing type ',S(1).type]);
             end
@@ -233,6 +236,9 @@ classdef escdf_property < handle
         % storage.
             switch S(1).type
                 case '()'
+                    if strcmp(obj.backing_state, 'hdf5_external')
+                        obj.read_into_memory();
+                    end
                     if obj.inmemory
                         if any(strcmpi({'i1','i2','i4','i8','u1','u2','u4','u8','f4','f8'},obj.format))
                             % Clip imaginary part if it shouldn't exist
@@ -315,6 +321,8 @@ classdef escdf_property < handle
         % If the property is already on disk, the method issues a warning
         % and does not rewrite the data.
             if ~obj.inmemory
+                % TODO: This needs to be updated because it could be on disk but on a different
+                % external hdf5 file.
                 warning('Call to the write_to_disk method is unnecessary as the data is already on disk.  Data was not written.')
                 return
             else
@@ -342,6 +350,7 @@ classdef escdf_property < handle
                 H5A.close(attr_id);
                 H5T.close(str_type_id);
                 H5S.close(attr_space_id);
+                obj.backing_state = 'hdf5_native';
             end
         end
 
@@ -384,6 +393,19 @@ classdef escdf_property < handle
                     obj.data = fn_handle(zeros(size));
                 end
                 obj.subsasgn(S,data);
+                obj.backing_state = 'memory';
+            end
+        end
+
+        function mark_external_backing(obj)
+        % Mark the property as externally backed.
+        %
+        % Notes
+        % -----
+        % This is intended for copied/attached property wrappers that still
+        % reference an HDF5 source outside their new native context.
+            if strcmp(obj.backing_state, 'hdf5_native')
+                obj.backing_state = 'hdf5_external';
             end
         end
 
@@ -497,6 +519,16 @@ classdef escdf_property < handle
             else
                 data = obj(:);
             end
+        end
+
+        function out = get_backing_state(obj)
+        % Return the property's backing state.
+        %
+        % Returns
+        % -------
+        % out : char
+        %     Property backing state.
+            out = obj.backing_state;
         end
 
         function obj = set_h5type(obj,escdf_type)
@@ -771,6 +803,7 @@ classdef escdf_property < handle
             obj = escdf_property(name,data_type,dims,'ragged',ragged);
             obj.inmemory = false;
             obj.h5d_id = dataset_id;
+            obj.backing_state = 'hdf5_native';
         end
     end
 end
