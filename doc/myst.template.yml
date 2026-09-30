@@ -88,5 +88,5 @@ site:
     primary_sidebar_footer: |
       - [Python Test Coverage](/python_coverage/)
       - [Matlab Test Coverage](/matlab_coverage/)
-      - [Gitlab Repository](https://github.com/sandialabs/Engineering-Sciences-Common-Data-Format)
+      - [GitHub Repository](https://github.com/sandialabs/Engineering-Sciences-Common-Data-Format)
       - [Report an Issue](https://github.com/sandialabs/Engineering-Sciences-Common-Data-Format/issues)
