@@ -112,11 +112,14 @@ jobs:
         run: |
           mkdir -p badges
           coverage xml -o coverage.xml
-          coverage html
+          coverage html -d htmlcov
+          ls -la
+          ls -la htmlcov
+          test -f htmlcov/index.html
           python -c "import xml.etree.ElementTree as ET; print(int(round(100*float(ET.parse('coverage.xml').getroot().attrib['line-rate']))))" > py_line_rate.txt
           STATEMENT_COVERAGE=$(cat py_line_rate.txt)
           python -m anybadge --label='Python Test Coverage' --value=${STATEMENT_COVERAGE} --file=badges/python_test_coverage.svg 20=red 40=orange 80=yellow 90=green
-
+          
       - name: Upload Python test artifacts
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4
