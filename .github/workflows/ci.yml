@@ -360,6 +360,8 @@ jobs:
           fi
 
       - name: Generate documentation sources
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           python doc/build_doc_sources.py \
             --repo-root . \
