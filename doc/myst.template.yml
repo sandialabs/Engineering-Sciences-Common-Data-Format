@@ -1,0 +1,92 @@
+# See docs at: https://mystmd.org/guide/frontmatter
+version: 1
+project:
+  id: 5b93cfd3-5cb1-4b52-89eb-faebb1d1dfd0
+  title: "ESCDF: A Specified Common Data Format"
+  description: ESCDF is a file type used to share data between groups, ensuring that all relevant metadata is included in the data package.
+  keywords:
+    - structural-dynamics
+    - modal
+    - vibration
+    - python
+    - interactive
+  # authors: []
+  # github: https://github.com/sandialabs/sdynpy
+  abbreviations:
+    6DoF: Six Degree-of-Freedom
+    API: Application Programming Interface
+    APSD: Auto-Power Spectral Density
+    CCLD: Constant Current Line Drive
+    COLA: Constant Overlap and Add
+    CPSD: Cross-Power Spectral Density
+    FEM: Finite Element Model
+    FFT: Fast Fourier Transform
+    FRF: Frequency Response Function
+    GUI: Graphical User Interface
+    ICP: Integrated Circuit Piezoelectric
+    IDE: Integrated Development Environment
+    IEPE: Integrated Electronics PiezoElectric
+    IFFT: Inverse Fast Fourier Transform
+    IP: Internet Protocol
+    JSON: Javascript Object Notation
+    MIMO: Multiple Input, Multiple Output
+    ReST: Representational State Transfer
+    RMS: Root-Mean-Square
+    SVD: Singular Value Decomposition
+    TRAC: Time Response Assurance Criterion
+    UI: User Interface
+  toc:
+    - file: index.md
+    - file: design_goals.md
+    - file: general_concepts.md
+    - file: file_structure.md
+    - file: specification_files.md
+    - file: software_implementation.md
+    - title: Examples
+      children:
+        - file: examples/sierrasd_eigen_write_to_escdf_python.ipynb
+          hidden: true
+        - file: examples/sierrasd_eigen_write_to_escdf_matlab.ipynb
+          hidden: true
+        - file: examples/sierrasd_eigen_write_to_escdf.md
+        - file: examples/sierrasd_eigen_read_from_escdf_python.ipynb
+          hidden: true
+        - file: examples/sierrasd_eigen_read_from_escdf_matlab.ipynb
+          hidden: true
+        - file: examples/sierrasd_eigen_read_from_escdf.md
+        - file: examples/flatten_unflatten_python.ipynb
+          hidden: true
+        - file: examples/flatten_unflatten_matlab.ipynb
+          hidden: true
+        - file: examples/flatten_unflatten.md
+        - file: examples/geometry_python.ipynb
+          hidden : true
+        - file: examples/geometry_matlab.ipynb
+          hidden : true
+        - file: examples/geometry.md
+    - title: Specification Reference
+      children:
+        # <<SPEC_API_TOC>>
+    - title: API Reference
+      children:
+        # <<PYTHON_API_TOC>>
+        # <<MATLAB_API_TOC>>
+
+  # bibliography:
+  #   - book/main.bib
+
+site:
+  template: book-theme
+  options:
+    # favicon: book/images/icon_only_cut.svg
+    # logo: book/images/logo_horizontal.svg
+    # logo_dark: book/images/logo_horizontal_light.svg
+    # numbered_references: true
+    logo_text: ESCDF - The Engineering Sciences Common Data Format
+    style: style/extra.css
+  parts:
+    primary_sidebar_footer: |
+      - [Python Test Coverage](/python_coverage/)
+      - [Matlab Test Coverage](/matlab_coverage/)
+      - [Gitlab Repository](https://github.com/sandialabs/Engineering-Sciences-Common-Data-Format)
+      - [Report an Issue](https://github.com/sandialabs/Engineering-Sciences-Common-Data-Format/issues)

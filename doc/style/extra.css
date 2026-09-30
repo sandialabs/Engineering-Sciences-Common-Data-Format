@@ -1,0 +1,16 @@
+.article-grid {
+    grid-template-columns: [screen-start] .5rem [screen-inset-start] 1fr [page-start] 3rem [page-inset-start] minmax(4rem,12rem) [body-outset-start] 3rem [body-start gutter-left-start] 1rem [body-inset-start] minmax(8ch,10ch) [middle-start] minmax(8ch,10ch) [gutter-left-end] minmax(8ch,10ch) minmax(8ch,10ch) [gutter-right-start] minmax(8ch,10ch) [middle-end] minmax(8ch,80ch) [body-inset-end] 1rem [body-end gutter-right-end] 1rem [body-outset-end] minmax(5rem,13rem) [page-inset-end] 3rem [page-end] 1fr [screen-inset-end] .5rem [screen-end];
+}
+
+.myst-primary-sidebar {
+    grid-template-columns:  [screen-start] .5rem [screen-inset-start] 1fr [page-start] 3rem [page-inset-start] minmax(4rem,12rem) [body-outset-start] 3rem [body-start gutter-left-start] 1rem [body-inset-start] minmax(8ch,10ch) [middle-start] minmax(8ch,10ch) [gutter-left-end] minmax(8ch,10ch) minmax(8ch,10ch) [gutter-right-start] minmax(8ch,10ch) [middle-end] minmax(8ch,80ch) [body-inset-end] 1rem [body-end gutter-right-end] 3rem [body-outset-end] minmax(5rem,13rem) [page-inset-end] 3rem [page-end] 1fr [screen-inset-end] .5rem [screen-end];
+}
+
+/* .myst-jp-nb-block {
+    max-width: 200%;
+    width: 150%;
+} */
+
+/* table td, table th {
+    white-space: nowrap !important;
+} */

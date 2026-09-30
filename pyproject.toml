@@ -1,0 +1,79 @@
+[build-system]
+requires = [
+    "setuptools>=42",
+    "wheel"
+]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ['']
+
+[tool.setuptools.package-data]
+"escdf" = ["specifications/*.txt"]
+
+[project]
+name = 'escdf'
+authors = [
+  {email = 'dprohe@sandia.gov'},
+  {name = 'Daniel P. Rohe'}
+]
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+description = 'The Engineering Sciences Common Data Format (ESCDF) is a file format used to share data between groups in a common structured data format.'
+readme = 'README.rst'
+dependencies = [
+    "h5py"
+    ]
+
+requires-python = '>=3.10'
+version = '0.1.0'
+classifiers = [
+    'Natural Language :: English',
+    'Operating System :: Microsoft :: Windows :: Windows 10',
+    'Operating System :: MacOS :: MacOS X',
+    'Operating System :: POSIX :: Linux',
+    'Programming Language :: Python :: 3.10',
+    'Framework :: Pytest',
+    ]
+
+[project.optional-dependencies]
+test = ['pytest','pytest-cov','coverage']
+lint = ["pylint"]
+book = ["jupyter-book", "notebook", "jupyterlab", "jupyter-server", "ipykernel", "jupyter-matlab-proxy"]
+
+[project.urls]
+Documentation = 'https://sandialabs.github.io/Engineering-Sciences-Common-Data-Format'
+Repository = 'https://github.com/sandialabs/Engineering-Sciences-Common-Data-Format'
+
+[tool.pytest.ini_options]
+junit_family = 'xunit2'
+addopts = '--doctest-modules --doctest-continue-on-failure --doctest-glob="*.rst" --verbose --junitxml=report.xml'
+testpaths = 'tests'
+markers = [
+    "interop: cross-language interoperability tests"
+]
+
+[tool.coverage.run]
+omit = [
+    "setup.py",
+    "*__main__.py"
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no coverage",
+    "if __name__ == '__main__'",
+    "def main",
+    "def __repr__"
+]
+
+[tool.coverage.html]
+directory = "coverage_html"
+
+[tool.flake8]
+max-line-length = 100
+
+[tool.pycodestyle]
+count = true
+max-line-length = 160
+statistics = true

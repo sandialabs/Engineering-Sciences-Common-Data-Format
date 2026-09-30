@@ -1,0 +1,409 @@
+name: ci.yml
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+    inputs:
+      test_level:
+        description: "Testing level (fast | full)"
+        required: true
+        default: "fast"
+        type: choice
+        options:
+          - fast
+          - full
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint-python:
+    name: Lint Python
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install lint dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .[lint] anybadge pylint-exit
+
+      - name: Run pylint
+        run: |
+          mkdir -p logs badges
+          pylint --output-format=text escdf | tee logs/lint.log || pylint-exit $?
+
+      - name: Create lint badge
+        if: always()
+        run: |
+          if [ -f logs/lint.log ]; then
+            PYLINT_SCORE=$(sed -n 's/^Your code has been rated at \([-0-9.]*\)\/.*/\1/p' logs/lint.log | tail -n 1)
+            if [ -n "$PYLINT_SCORE" ]; then
+              anybadge -o --label=lint --file=badges/lint.svg --value=${PYLINT_SCORE} 2=red 4=orange 8=yellow 10=green
+            else
+              anybadge -o -l lint -v failing -f badges/lint.svg -c red
+            fi
+          else
+            anybadge -o -l lint -v failing -f badges/lint.svg -c red
+          fi
+
+      - name: Upload lint artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: |
+            logs/
+            badges/
+
+  test-python:
+    name: Python tests (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .[test] anybadge
+
+      - name: Run Python tests without interop
+        run: |
+          coverage run --source escdf -m pytest -m "not interop"
+          coverage report
+
+      - name: Create coverage outputs
+        if: matrix.python-version == '3.12'
+        run: |
+          mkdir -p badges
+          coverage xml -o coverage.xml
+          coverage html
+          python -c "import xml.etree.ElementTree as ET; print(int(round(100*float(ET.parse('coverage.xml').getroot().attrib['line-rate']))))" > py_line_rate.txt
+          STATEMENT_COVERAGE=$(cat py_line_rate.txt)
+          python -m anybadge --label='Python Test Coverage' --value=${STATEMENT_COVERAGE} --file=badges/python_test_coverage.svg 20=red 40=orange 80=yellow 90=green
+
+      - name: Upload Python test artifacts
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-test-artifacts
+          path: |
+            .coverage
+            coverage.xml
+            htmlcov/
+            badges/
+            py_line_rate.txt
+
+  test-matlab:
+    name: MATLAB tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v2
+
+      - name: Run MATLAB tests
+        uses: matlab-actions/run-command@v2
+        with:
+          command: "run('run_tests.m')"
+
+      - name: Upload MATLAB artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matlab-test-artifacts
+          path: |
+            ci_artifacts/
+            badges/
+          if-no-files-found: warn
+
+  interop-python-write:
+    name: Write Python interop fixtures
+    needs: test-python
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .[test]
+
+      - name: Write Python fixtures
+        run: |
+          mkdir -p ci_artifacts/interop/python_written
+          python tests/interop/write_python_fixtures.py
+
+      - name: Upload Python interop fixtures
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-written-interop
+          path: ci_artifacts/interop/python_written/
+          if-no-files-found: error
+
+  interop-matlab-read:
+    name: MATLAB reads Python fixtures
+    needs: [test-matlab, interop-python-write]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Python interop fixtures
+        uses: actions/download-artifact@v4
+        with:
+          name: python-written-interop
+          path: ci_artifacts/interop/python_written/
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v2
+
+      - name: Run MATLAB read-Python interop tests
+        uses: matlab-actions/run-command@v2
+        with:
+          command: "run('run_interop_matlab_read_python.m')"
+
+      - name: Upload MATLAB interop read artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matlab-read-python-artifacts
+          path: ci_artifacts/
+          if-no-files-found: warn
+
+  interop-matlab-write:
+    name: MATLAB writes interop fixtures
+    needs: test-matlab
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v2
+
+      - name: Run MATLAB write interop fixtures
+        uses: matlab-actions/run-command@v2
+        with:
+          command: "run('run_interop_matlab_write.m')"
+
+      - name: Upload MATLAB interop fixtures
+        uses: actions/upload-artifact@v4
+        with:
+          name: matlab-written-interop
+          path: ci_artifacts/interop/matlab_written/
+          if-no-files-found: warn
+
+  interop-python-read:
+    name: Python reads MATLAB fixtures
+    needs: [test-python, interop-matlab-write]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download MATLAB interop fixtures
+        uses: actions/download-artifact@v4
+        with:
+          name: matlab-written-interop
+          path: ci_artifacts/interop/matlab_written/
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .[test]
+
+      - name: Run Python read-MATLAB interop tests
+        run: |
+          pytest -m interop tests/interop/read_matlab_fixtures_test.py
+
+      - name: Upload Python interop read artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-read-matlab-artifacts
+          path: ci_artifacts/
+          if-no-files-found: warn
+
+  build-dist:
+    name: Build distribution
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Build distribution
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  build-docs:
+    name: Build docs
+    needs: [test-python, test-matlab]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install documentation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .[book] anybadge
+
+      - name: Download Python test artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-test-artifacts
+          path: python-test-artifacts
+
+      - name: Download MATLAB test artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: matlab-test-artifacts
+          path: matlab-test-artifacts
+
+      - name: Prepare badges for docs
+        run: |
+          mkdir -p doc/badges badges
+
+          if [ -d python-test-artifacts/badges ]; then
+            cp -r python-test-artifacts/badges/* doc/badges/ || true
+            cp -r python-test-artifacts/badges/* badges/ || true
+          fi
+
+          if [ -f matlab-test-artifacts/ci_artifacts/matlab/coverage/statement_coverage_percent.txt ]; then
+            STATEMENT_COVERAGE=$(cat matlab-test-artifacts/ci_artifacts/matlab/coverage/statement_coverage_percent.txt)
+            python -m anybadge --label="Matlab Test Coverage" --value=${STATEMENT_COVERAGE} --file=badges/matlab_test_coverage.svg 20=red 40=orange 80=yellow 90=green
+            cp badges/matlab_test_coverage.svg doc/badges/
+          else
+            python -m anybadge --label="Matlab Test Coverage" --value="not run" --file=badges/matlab_test_coverage.svg red
+            cp badges/matlab_test_coverage.svg doc/badges/
+          fi
+
+      - name: Generate documentation sources
+        run: |
+          python doc/build_doc_sources.py \
+            --repo-root . \
+            --repo-url "https://github.com/${{ github.repository }}" \
+            --ref "${{ github.sha }}"
+
+      - name: Build Jupyter Book
+        env:
+          BASE_URL: /${{ github.event.repository.name }}
+        run: |
+          cd doc
+          jupyter-book build --html
+
+      - name: Upload docs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: doc/_build/html/
+
+  deploy-pages:
+    name: Deploy GitHub Pages
+    if: github.ref == 'refs/heads/main'
+    needs: build-docs
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+      contents: read
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Download site artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
