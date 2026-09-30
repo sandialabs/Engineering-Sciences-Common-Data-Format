@@ -375,6 +375,22 @@ jobs:
           cd doc
           jupyter-book build --html
 
+      - name: Add coverage reports to site
+        run: |
+          mkdir -p doc/_build/html/python_coverage
+          if [ -d python-test-artifacts/htmlcov ]; then
+            cp -r python-test-artifacts/htmlcov/* doc/_build/html/python_coverage/
+          else
+            echo "Python coverage HTML directory not found"
+          fi
+
+          mkdir -p doc/_build/html/matlab_coverage
+          if [ -d matlab-test-artifacts/ci_artifacts/matlab/coverage/html ]; then
+            cp -r matlab-test-artifacts/ci_artifacts/matlab/coverage/html/* doc/_build/html/matlab_coverage/
+          else
+            echo "MATLAB coverage HTML directory not found"
+          fi
+
       - name: Upload docs artifact
         uses: actions/upload-artifact@v4
         with:
