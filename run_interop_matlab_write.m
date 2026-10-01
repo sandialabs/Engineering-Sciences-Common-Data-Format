@@ -7,7 +7,7 @@
 disp(version);
 disp(version('-release'));
 
-addpath(fullfile(pwd, "escdf"));
+addpath(genpath(fullfile(pwd, "escdf")));
 addpath(fullfile(pwd, "tests", "interop"));
 
 cfgPath = escdf.escdf_config_path();
