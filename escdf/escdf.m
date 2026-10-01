@@ -903,6 +903,10 @@ classdef escdf < handle
                     dataset = escdf_dataset.load([hdf5_path,'::/activities/',activity_name,'/',activity_data_name],readonly);
                     escdf_file.insert_data_to_activity_native(valid_activity_name,dataset);
                 end
+
+                loaded_activity = escdf_file.get_activity(valid_activity_name);
+                loaded_activity.set_backing_state('hdf5_native');
+                loaded_activity.set_has_pending_changes(false);
             end
             escdf_file.backing_state = 'hdf5_native';
             escdf_file.lifecycle_state = 'draft';

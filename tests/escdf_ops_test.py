@@ -266,7 +266,9 @@ def test_mutating_container_sets_pending_changes(monkeypatch):
     assert f.has_pending_changes is True
 
 
-def test_write_to_disk_sets_hdf5_native_and_clears_pending_changes(tmp_path, monkeypatch):
+def test_write_to_disk_sets_hdf5_native_and_clears_pending_changes(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(
         escdf.ESCDF,
         "get_or_prompt_attribution_name",
@@ -288,7 +290,9 @@ def test_write_to_disk_sets_hdf5_native_and_clears_pending_changes(tmp_path, mon
     assert f.has_pending_changes is False
 
 
-def test_loaded_escdf_container_starts_in_expected_state_readonly(tmp_path, monkeypatch):
+def test_loaded_escdf_container_starts_in_expected_state_readonly(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(
         escdf.ESCDF,
         "get_or_prompt_attribution_name",
@@ -310,7 +314,9 @@ def test_loaded_escdf_container_starts_in_expected_state_readonly(tmp_path, monk
     assert loaded.has_pending_changes is False
 
 
-def test_loaded_escdf_container_starts_in_expected_state_editable(tmp_path, monkeypatch):
+def test_loaded_escdf_container_starts_in_expected_state_editable(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(
         escdf.ESCDF,
         "get_or_prompt_attribution_name",
@@ -418,7 +424,9 @@ def test_add_metadata_clones_hdf5_native_properties_as_external(tmp_path, monkey
     assert attached_md.program[...] == "program abc"
 
 
-def test_mutating_external_backed_attached_metadata_materializes_clone_only(tmp_path, monkeypatch):
+def test_mutating_external_backed_attached_metadata_materializes_clone_only(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(
         escdf.ESCDF,
         "get_or_prompt_attribution_name",
@@ -484,7 +492,9 @@ def test_add_data_to_activity_clones_dataset_wrapper(monkeypatch):
     assert attached_data.unit[...] == "m/s^2"
 
 
-def test_add_hdf5_native_data_to_activity_creates_external_backed_clone(tmp_path, monkeypatch):
+def test_add_hdf5_native_data_to_activity_creates_external_backed_clone(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(
         escdf.ESCDF,
         "get_or_prompt_attribution_name",
@@ -523,3 +533,76 @@ def test_add_hdf5_native_data_to_activity_creates_external_backed_clone(tmp_path
 
     assert attached_data.value[...] == np.float64(9.81)
     assert attached_data.unit[...] == "m/s^2"
+
+
+def test_new_activity_starts_in_expected_state():
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    activity = escdf.Activity("act1", "Activity one", when)
+
+    assert activity.backing_state == "memory"
+    assert activity.has_pending_changes is False
+
+
+def test_activity_link_to_metadata_sets_pending_changes():
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    activity = escdf.Activity("act1", "Activity one", when)
+
+    assert activity.has_pending_changes is False
+    activity.link_to_metadata("meta1")
+    assert activity.has_pending_changes is True
+
+
+def test_activity_add_data_sets_pending_changes():
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    activity = escdf.Activity("act1", "Activity one", when)
+    data = make_minimal_data("data1")
+
+    assert activity.has_pending_changes is False
+    activity.add_data(data)
+    assert activity.has_pending_changes is True
+
+
+def test_loaded_activity_starts_hdf5_native_with_no_pending_changes(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "loaded_activity_state.h5"
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+    data = make_minimal_data("data1")
+    f.add_data_to_activity("act1", data)
+    f.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path))
+    loaded_activity = loaded.activities["act1"]
+
+    assert loaded_activity.backing_state == "hdf5_native"
+    assert loaded_activity.has_pending_changes is False
+
+
+def test_activity_write_to_disk_sets_hdf5_native_and_clears_pending_changes(tmp_path):
+    file_path = tmp_path / "activity_write_state.h5"
+    h5_file = h5py.File(file_path, "w")
+    activity_group = h5_file.create_group("activities")
+
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    activity = escdf.Activity("act1", "Activity one", when)
+    data = make_minimal_data("data1")
+    activity.add_data(data)
+
+    assert activity.backing_state == "memory"
+    assert activity.has_pending_changes is True
+
+    activity.write_to_disk(activity_group)
+
+    assert activity.backing_state == "hdf5_native"
+    assert activity.has_pending_changes is False
+
+    h5_file.close()

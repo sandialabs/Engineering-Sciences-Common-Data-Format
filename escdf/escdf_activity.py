@@ -52,13 +52,20 @@ class ESCDFActivity:
     ESCDFDataset
     ESCDFActivityArray
     """
-    __slots__ = ("_data", "_metadata_links", "_name", "_descriptive_name", "_activity_date")
+
+    __slots__ = (
+        "_data",
+        "_metadata_links",
+        "_name",
+        "_descriptive_name",
+        "_activity_date",
+        "_backing_state",
+        "_has_pending_changes",
+    )
 
     @property
     def data(self):
-        return (
-            self._data
-        )
+        return self._data
 
     @property
     def data_names(self):
@@ -97,6 +104,14 @@ class ESCDFActivity:
         if not isinstance(value, dt.datetime):
             raise ValueError("`activity_date` must be a datetime.datetime object.")
         self._activity_date = value
+
+    @property
+    def backing_state(self):
+        return self._backing_state
+
+    @property
+    def has_pending_changes(self):
+        return self._has_pending_changes
 
     def __init__(
         self,
@@ -154,8 +169,13 @@ class ESCDFActivity:
                         "If specified, `metadata_links` must be a 1D iterable of strings"
                     )
             except (IndexError, TypeError, KeyError):
-                raise ValueError("If specified, `metadata_links` must be a 1D iterable of strings")
+                raise ValueError(
+                    "If specified, `metadata_links` must be a 1D iterable of strings"
+                )
             self._metadata_links = [value for value in metadata_links]
+
+        self._backing_state = "memory"
+        self._has_pending_changes = False
 
     def link_to_metadata(self, metadata_name):
         """
@@ -173,9 +193,12 @@ class ESCDFActivity:
         """
         if metadata_name in self.metadata_links:
             raise ValueError(
-                "Activity {:} is already linked to metadata {:}".format(self.name, metadata_name)
+                "Activity {:} is already linked to metadata {:}".format(
+                    self.name, metadata_name
+                )
             )
         self._metadata_links.append(metadata_name)
+        self._has_pending_changes = True
 
     def unlink_from_metadata(self, metadata_name):
         """
@@ -195,9 +218,12 @@ class ESCDFActivity:
             index = self.metadata_links.index(metadata_name)
         except ValueError:
             raise ValueError(
-                "Metadata {:} does not exist in activity {:}".format(metadata_name, self.name)
+                "Metadata {:} does not exist in activity {:}".format(
+                    metadata_name, self.name
+                )
             )
         self._metadata_links.pop(index)
+        self._has_pending_changes = True
 
     def add_data(self, dataset):
         """
@@ -216,7 +242,9 @@ class ESCDFActivity:
             dataset with the same name already exists in the activity.
         """
         if not isinstance(dataset, ESCDFDataset):
-            raise ValueError("Data added to activities must be in the form of an ESCDF Dataset")
+            raise ValueError(
+                "Data added to activities must be in the form of an ESCDF Dataset"
+            )
         if not dataset.istype("activity_result") and not dataset.istype("unknown"):
             raise ValueError(
                 'ESCDF Datasets added to activities should be an "activity_result" or inherit from it, not {:}.  Link this metadata to the activity instead.'.format(
@@ -230,6 +258,7 @@ class ESCDFActivity:
                 )
             )
         self._data.add_dataset(dataset)
+        self._has_pending_changes = True
 
     def remove_data(self, dataset_name):
         """
@@ -250,9 +279,12 @@ class ESCDFActivity:
             index = names.index(dataset_name)
         except ValueError:
             raise ValueError(
-                "No dataset with name {:} was found in this activity.".format(dataset_name)
+                "No dataset with name {:} was found in this activity.".format(
+                    dataset_name
+                )
             )
         self._data.remove_dataset(index)
+        self._has_pending_changes = True
 
     def get_data(self, dataset_name=None):
         """
@@ -283,7 +315,9 @@ class ESCDFActivity:
                 index = names.index(dataset_name)
             except ValueError:
                 raise ValueError(
-                    "No dataset with name {:} was found in this activity.".format(dataset_name)
+                    "No dataset with name {:} was found in this activity.".format(
+                        dataset_name
+                    )
                 )
             return self._data[index]
 
@@ -335,6 +369,9 @@ class ESCDFActivity:
         for dataset in self.data:
             data_group = activity_group.create_group(dataset.name)
             dataset.write_to_disk(data_group)
+
+        self._backing_state = "hdf5_native"
+        self._has_pending_changes = False
 
 
 class ESCDFActivityArray:
@@ -412,7 +449,9 @@ class ESCDFActivityArray:
             raise ValueError("Added activity must be in the form of an ESCDF Activity")
         if any([ac.name == activity.name for ac in self.activities]):
             raise ValueError(
-                "An ESCDF Activity with the name {:} already exists.".format(activity.name)
+                "An ESCDF Activity with the name {:} already exists.".format(
+                    activity.name
+                )
             )
         self._activities.append(activity)
 
@@ -438,7 +477,9 @@ class ESCDFActivityArray:
             try:
                 index = self.names.index(activity_identifier)
             except ValueError:
-                raise ValueError("No activity with name {:} was found.".format(activity_identifier))
+                raise ValueError(
+                    "No activity with name {:} was found.".format(activity_identifier)
+                )
             self._activities.pop(index)
         else:
             raise ValueError(
@@ -455,7 +496,9 @@ class ESCDFActivityArray:
             try:
                 index = self.names.index(name_or_index)
             except ValueError:
-                raise ValueError("No activity with name {:} was found.".format(name_or_index))
+                raise ValueError(
+                    "No activity with name {:} was found.".format(name_or_index)
+                )
             return self.activities[index]
         elif isinstance(name_or_index, slice) or isinstance(name_or_index, Ellipsis):
             return ESCDFActivityArray(self.activities[name_or_index])
@@ -468,7 +511,9 @@ class ESCDFActivityArray:
         try:
             index = self.names.index(name)
         except ValueError as exc:
-            raise AttributeError("No activity with name {:} was found.".format(name)) from exc
+            raise AttributeError(
+                "No activity with name {:} was found.".format(name)
+            ) from exc
         return self.activities[index]
 
     def repr(self):

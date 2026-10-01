@@ -6,6 +6,7 @@ This module defines :class:`ESCDF`, the top-level container used to
 organize metadata datasets, activities, and file-level creation metadata
 for an ESCDF HDF5 file.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -150,7 +151,12 @@ class ESCDF:
         self._has_pending_changes = True
 
     def add_activity(
-        self, short_name, descriptive_name, activity_date, data=None, metadata_links=None
+        self,
+        short_name,
+        descriptive_name,
+        activity_date,
+        data=None,
+        metadata_links=None,
     ):
         """
         Add a new activity to the container.
@@ -182,12 +188,16 @@ class ESCDF:
         ``activity_result`` or inherit from it.
         """
         if any([name == short_name for name in self.activities.names]):
-            raise ValueError("An activity with name {:} already exists.".format(short_name))
+            raise ValueError(
+                "An activity with name {:} already exists.".format(short_name)
+            )
         if metadata_links is not None:
             for link_name in metadata_links:
                 if not link_name in self.metadata.names:
                     raise ValueError(
-                        "Metadata link name {:} not found in metadata list".format(link_name)
+                        "Metadata link name {:} not found in metadata list".format(
+                            link_name
+                        )
                     )
         new_activity = ESCDFActivity(
             short_name, descriptive_name, activity_date, data, metadata_links
@@ -286,7 +296,9 @@ class ESCDF:
         """
         if not metadata_name in self.metadata.names:
             raise ValueError(
-                "Name {:} does not correspond to any defined metadata names".format(metadata_name)
+                "Name {:} does not correspond to any defined metadata names".format(
+                    metadata_name
+                )
             )
         self.activities[activity_name].link_to_metadata(metadata_name)
         self._has_pending_changes = True
@@ -386,7 +398,10 @@ class ESCDF:
         ESCDFDatasetArray
             Metadata datasets linked to the activity.
         """
-        metadata = [self.metadata[name] for name in self.activities[activity_name].metadata_links]
+        metadata = [
+            self.metadata[name]
+            for name in self.activities[activity_name].metadata_links
+        ]
         return ESCDFDatasetArray(metadata)
 
     @staticmethod
@@ -475,7 +490,9 @@ class ESCDF:
                 cloned._modified_properties.add(property_name)
                 cloned._has_modified_properties = True
 
-            setattr(cloned, property_name, cls._clone_property_for_attach(property_value))
+            setattr(
+                cloned, property_name, cls._clone_property_for_attach(property_value)
+            )
 
         # Preserve malformed/extra-property state if present.
         cloned._has_modified_properties = (
@@ -563,7 +580,9 @@ class ESCDF:
         for metadata in self.metadata:
             if not metadata.validate():
                 raise ValueError(
-                    "Cannot write to disk, metadata {:} is invalid.".format(metadata.name)
+                    "Cannot write to disk, metadata {:} is invalid.".format(
+                        metadata.name
+                    )
                 )
         # Now go through and make sure all data is valid
         for activity in self.activities:
@@ -651,7 +670,9 @@ class ESCDF:
             escdf_file._insert_metadata_native(dataset)
         activity_groups = h5_file["activities"]
         activity_names = [
-            key for key in activity_groups.keys() if isinstance(activity_groups[key], h5.Group)
+            key
+            for key in activity_groups.keys()
+            if isinstance(activity_groups[key], h5.Group)
         ]
         for activity_name in activity_names:
             activity_group = activity_groups[activity_name]
@@ -663,37 +684,45 @@ class ESCDF:
             except ValueError:
                 date = dt.datetime(1900, 1, 1, tzinfo=timezone.utc)
                 warnings.warn(
-                    f'Unable to convert {activity_group.attrs["activity_date"]} to datetime using the ISO format.  Setting date to 01-Jan-1900 for activity {activity_name}'
+                    f"Unable to convert {activity_group.attrs['activity_date']} to datetime using the ISO format.  Setting date to 01-Jan-1900 for activity {activity_name}"
                 )
             except KeyError:
                 date = dt.datetime(1900, 1, 1, tzinfo=timezone.utc)
                 warnings.warn(
-                    f'Unable to find activity date for activity {activity_name}.  Setting date to 01-Jan-1900 for activity {activity_name}.'
+                    f"Unable to find activity date for activity {activity_name}.  Setting date to 01-Jan-1900 for activity {activity_name}."
                 )
             name_valid = is_valid_identifier(activity_name)
             if not name_valid:
-                valid_activity_name = make_valid_identifier(activity_name, 'activity_')
+                valid_activity_name = make_valid_identifier(activity_name, "activity_")
             else:
                 valid_activity_name = activity_name
             escdf_file.add_activity(valid_activity_name, long_name, date)
             try:
                 links = activity_group["parameters"][...]
             except KeyError:
-                warnings.warn(f"Activity {activity_name} missing parameters dataset; assuming no metadata links.")
+                warnings.warn(
+                    f"Activity {activity_name} missing parameters dataset; assuming no metadata links."
+                )
                 links = []
             for metadata_name in links:
                 if isinstance(metadata_name, (bytes, np.bytes_)):
                     metadata_name = metadata_name.decode()
                 name_valid = is_valid_identifier(metadata_name)
                 if not name_valid:
-                    metadata_name = make_valid_identifier(metadata_name, 'dataset_')
+                    metadata_name = make_valid_identifier(metadata_name, "dataset_")
                 escdf_file.link_activity_to_metadata(valid_activity_name, metadata_name)
             activity_data_names = [
-                key for key in activity_group.keys() if isinstance(activity_group[key], h5.Group)
+                key
+                for key in activity_group.keys()
+                if isinstance(activity_group[key], h5.Group)
             ]
             for activity_data_name in activity_data_names:
                 dataset = ESCDFDataset.load(h5_group=activity_group[activity_data_name])
                 escdf_file._insert_data_to_activity_native(valid_activity_name, dataset)
+                loaded_activity = escdf_file.activities[valid_activity_name]
+                loaded_activity._backing_state = "hdf5_native"
+                loaded_activity._has_pending_changes = False
+
         escdf_file._backing_state = "hdf5_native"
         escdf_file._lifecycle_state = "draft"
         escdf_file._mutability_state = "read_only" if readonly else "editable"
@@ -719,7 +748,11 @@ class ESCDF:
 
         if sys.platform == "darwin":
             return (
-                Path.home() / "Library" / "Application Support" / LIB_DISPLAY_NAME / "config.json"
+                Path.home()
+                / "Library"
+                / "Application Support"
+                / LIB_DISPLAY_NAME
+                / "config.json"
             )
 
         # Linux/Unix

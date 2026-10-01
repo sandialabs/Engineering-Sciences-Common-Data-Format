@@ -38,6 +38,8 @@ classdef escdf_activity < handle
         name;
         descriptive_name;
         activity_date;
+        backing_state;
+        has_pending_changes;
     end
 
     methods
@@ -97,6 +99,9 @@ classdef escdf_activity < handle
             else
                 error('activity_date must be a datetime object')
             end
+
+            obj.backing_state = 'memory';
+            obj.has_pending_changes = false;
         end
 
         function link_to_metadata(obj,metadata_name)
@@ -116,6 +121,7 @@ classdef escdf_activity < handle
                 error(['Activity ',obj.name,' is already linked to metadata ',metadata_name])
             end
             obj.metadata_links{end+1} = metadata_name;
+            obj.has_pending_changes = true;
         end
 
         function unlink_from_metadata(obj,metadata_name)
@@ -138,6 +144,7 @@ classdef escdf_activity < handle
                 error(['Metadata ',metadata_name,' does not exist in activity ',obj.name])
             else
                 obj.metadata_links = remove_array_index(obj.metadata_links, index);
+                obj.has_pending_changes = true;
             end
         end
 
@@ -171,6 +178,37 @@ classdef escdf_activity < handle
             date = obj.activity_date;
         end
 
+        function out = get_backing_state(obj)
+        % Return the activity backing state.
+        %
+        % Returns
+        % -------
+        % out : char
+        %     Activity backing state.
+            out = obj.backing_state;
+        end
+
+        function out = get_has_pending_changes(obj)
+        % Return whether the activity has pending changes.
+        %
+        % Returns
+        % -------
+        % out : logical
+        %     True if the activity has pending changes relative to its
+        %     current authoritative/reference state.
+            out = obj.has_pending_changes;
+        end
+
+        function set_backing_state(obj, state)
+        % Set the activity backing state.
+            obj.backing_state = state;
+        end
+
+        function set_has_pending_changes(obj, tf)
+        % Set the activity pending-changes flag.
+            obj.has_pending_changes = tf;
+        end
+
         function add_data(obj,dataset)
         % Add a result dataset to the activity.
         %
@@ -195,6 +233,7 @@ classdef escdf_activity < handle
                 error(['Data with name ',dataset.get_name(),' already exists in this activity.'])
             end
             obj.data = [obj.data,dataset];
+            obj.has_pending_changes = true;
         end
 
         function remove_data(obj,dataset_name)
@@ -217,6 +256,7 @@ classdef escdf_activity < handle
                 error(['Multiple datasets links with the same name (',dataset_name,') in activity ',obj.name])
             else
                 obj.data = remove_array_index(obj.data, index);
+                obj.has_pending_changes = true;
             end
         end
 
@@ -361,6 +401,9 @@ classdef escdf_activity < handle
                     this_data.write_to_disk(this_gid);
                     H5G.close(this_gid);
                 end
+                
+                activity.set_backing_state('hdf5_native');
+                activity.set_has_pending_changes(false);
                 H5G.close(gid)
             end
         end

@@ -472,6 +472,79 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             testCase.verifyEqual(attached_data.unit(:), {'m/s^2'});
         end
 
+        function test_new_activity_starts_in_expected_state(testCase)
+        % Verify that a newly constructed activity starts memory-backed
+        % with no pending changes.
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            activity = escdf_activity('act1', 'Activity one', when);
+
+            testCase.verifyEqual(activity.get_backing_state(), 'memory');
+            testCase.verifyFalse(activity.get_has_pending_changes());
+        end
+
+        function test_activity_link_to_metadata_sets_pending_changes(testCase)
+        % Verify that linking metadata marks the activity as having pending changes.
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            activity = escdf_activity('act1', 'Activity one', when);
+
+            testCase.verifyFalse(activity.get_has_pending_changes());
+            activity.link_to_metadata('meta1');
+            testCase.verifyTrue(activity.get_has_pending_changes());
+        end
+
+        function test_activity_add_data_sets_pending_changes(testCase)
+        % Verify that adding data marks the activity as having pending changes.
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            activity = escdf_activity('act1', 'Activity one', when);
+            data = escdf_ops_test.make_minimal_data('data1');
+
+            testCase.verifyFalse(activity.get_has_pending_changes());
+            activity.add_data(data);
+            testCase.verifyTrue(activity.get_has_pending_changes());
+        end
+
+        function test_loaded_activity_starts_hdf5_native_with_no_pending_changes(testCase)
+        % Verify that an activity loaded from disk starts HDF5-native and
+        % has no pending changes.
+            outfile = fullfile(testCase.temp_folder, 'loaded_activity_state.h5');
+
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+            data = escdf_ops_test.make_minimal_data('data1');
+            f.add_data_to_activity('act1', data);
+            f.write_to_disk(outfile, true);
+
+            loaded = escdf.load(outfile);
+            loaded_activity = loaded.get_activity('act1');
+
+            testCase.verifyEqual(loaded_activity.get_backing_state(), 'hdf5_native');
+            testCase.verifyFalse(loaded_activity.get_has_pending_changes());
+        end
+
+        function test_activity_write_to_disk_sets_hdf5_native_and_clears_pending_changes(testCase)
+        % Verify that writing an activity to disk sets it HDF5-native and
+        % clears pending changes.
+            outfile = fullfile(testCase.temp_folder, 'activity_write_state.h5');
+            file_id = H5F.create(outfile, 'H5F_ACC_TRUNC', 'H5P_DEFAULT', 'H5P_DEFAULT');
+            activity_group = H5G.create(file_id, 'activities', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            activity = escdf_activity('act1', 'Activity one', when);
+            data = escdf_ops_test.make_minimal_data('data1');
+            activity.add_data(data);
+
+            testCase.verifyEqual(activity.get_backing_state(), 'memory');
+            testCase.verifyTrue(activity.get_has_pending_changes());
+
+            activity.write_to_disk(activity_group);
+
+            testCase.verifyEqual(activity.get_backing_state(), 'hdf5_native');
+            testCase.verifyFalse(activity.get_has_pending_changes());
+
+            H5G.close(activity_group);
+            H5F.close(file_id);
+        end
         
     end
 end
