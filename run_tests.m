@@ -10,7 +10,7 @@
 disp(version);
 disp(version('-release'));
 
-addpath(fullfile(pwd, "escdf"));
+addpath(genpath(fullfile(pwd, "escdf")));
 
 cfgPath = escdf.escdf_config_path();
 disp(['Writing Config File at ', cfgPath])
