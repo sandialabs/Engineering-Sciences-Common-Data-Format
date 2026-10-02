@@ -606,3 +606,144 @@ def test_activity_write_to_disk_sets_hdf5_native_and_clears_pending_changes(tmp_
     assert activity.has_pending_changes is False
 
     h5_file.close()
+
+
+def test_remove_metadata_returns_removed_object(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+
+    removed = f.remove_metadata("meta1")
+
+    assert removed.name == "meta1"
+    assert "meta1" not in f.metadata.names
+    assert f.has_pending_changes is True
+
+
+def test_remove_metadata_fails_if_still_linked_without_unlink(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md, activity_to_link="act1")
+
+    with pytest.raises(ValueError, match="still linked"):
+        f.remove_metadata("meta1")
+
+
+def test_remove_metadata_with_unlink_removes_links(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md, activity_to_link="act1")
+
+    removed = f.remove_metadata("meta1", unlink=True)
+
+    assert removed.name == "meta1"
+    assert "meta1" not in f.metadata.names
+    assert "meta1" not in f.activities["act1"].metadata_links
+    assert f.has_pending_changes is True
+
+
+def test_remove_activity_returns_removed_object(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    removed = f.remove_activity("act1")
+
+    assert removed.name == "act1"
+    assert "act1" not in f.activities.names
+    assert f.has_pending_changes is True
+
+
+def test_remove_activity_leaves_metadata_by_default(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md, activity_to_link="act1")
+
+    f.remove_activity("act1")
+
+    assert "act1" not in f.activities.names
+    assert "meta1" in f.metadata.names
+
+
+def test_remove_activity_can_delete_newly_unlinked_metadata(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md, activity_to_link="act1")
+
+    f.remove_activity("act1", delete_unlinked_metadata=True)
+
+    assert "act1" not in f.activities.names
+    assert "meta1" not in f.metadata.names
+
+
+def test_remove_activity_keeps_metadata_if_linked_elsewhere(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+    f.add_activity("act2", "Activity two", when)
+
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+    f.link_activity_to_metadata("act1", "meta1")
+    f.link_activity_to_metadata("act2", "meta1")
+
+    f.remove_activity("act1", delete_unlinked_metadata=True)
+
+    assert "act1" not in f.activities.names
+    assert "act2" in f.activities.names
+    assert "meta1" in f.metadata.names
+    assert "meta1" in f.activities["act2"].metadata_links

@@ -352,6 +352,119 @@ class ESCDF:
         self.activities[activity_name].remove_data(data_name)
         self._has_pending_changes = True
 
+    def remove_metadata(self, metadata_name, unlink=False):
+        """
+        Remove a metadata dataset from the container.
+
+        Parameters
+        ----------
+        metadata_name : str
+            Name of the metadata dataset to remove.
+        unlink : bool, optional
+            If ``True``, automatically unlink the metadata from all
+            activities before removing it. If ``False``, raise an error if
+            the metadata is still linked.
+
+        Returns
+        -------
+        ESCDFDataset
+            The removed metadata dataset object.
+
+        Raises
+        ------
+        ValueError
+            If no metadata dataset with the given name exists, or if the
+            metadata is still linked and ``unlink`` is ``False``.
+
+        Notes
+        -----
+        This operation removes the metadata from the in-memory container
+        graph only. It does not immediately delete any underlying physical
+        backing from disk.
+        """
+        try:
+            metadata = self.metadata[metadata_name]
+        except KeyError as exc:
+            raise ValueError(
+                f'No metadata dataset named "{metadata_name}" exists in this container.'
+            ) from exc
+
+        linked_activities = [
+            activity.name
+            for activity in self.activities
+            if metadata_name in activity.metadata_links
+        ]
+
+        if linked_activities and not unlink:
+            raise ValueError(
+                f'Metadata "{metadata_name}" is still linked to activities {linked_activities}. '
+                f"Use unlink=True to remove those links automatically."
+            )
+
+        if unlink:
+            for activity_name in linked_activities:
+                self.unlink_activity_from_metadata(activity_name, metadata_name)
+
+        index = self.metadata.names.index(metadata_name)
+        removed = self.metadata[index]
+        self.metadata.remove_dataset(index)
+        self._has_pending_changes = True
+        return removed
+
+    def remove_activity(self, activity_name, delete_unlinked_metadata=False):
+        """
+        Remove an activity from the container.
+
+        Parameters
+        ----------
+        activity_name : str
+            Name of the activity to remove.
+        delete_unlinked_metadata : bool, optional
+            If ``True``, also remove metadata datasets that were linked only
+            to the removed activity and are not linked to any remaining
+            activities afterward.
+
+        Returns
+        -------
+        ESCDFActivity
+            The removed activity object.
+
+        Raises
+        ------
+        ValueError
+            If no activity with the given name exists.
+
+        Notes
+        -----
+        This operation removes the activity from the in-memory container
+        graph only. It does not immediately delete any underlying physical
+        backing from disk.
+        """
+        try:
+            activity = self.activities[activity_name]
+        except KeyError as exc:
+            raise ValueError(
+                f'No activity named "{activity_name}" exists in this container.'
+            ) from exc
+
+        linked_metadata_names = list(activity.metadata_links)
+
+        index = self.activities.names.index(activity_name)
+        removed = self.activities[index]
+        self.activities.remove_activity(index)
+
+        if delete_unlinked_metadata:
+            for metadata_name in linked_metadata_names:
+                still_linked_elsewhere = any(
+                    metadata_name in other_activity.metadata_links
+                    for other_activity in self.activities
+                )
+                if not still_linked_elsewhere and metadata_name in self.metadata.names:
+                    self.remove_metadata(metadata_name, unlink=False)
+
+        self._has_pending_changes = True
+        return removed
+
     def get_activity_data(self, activity_name, data_name=None):
         """
         Retrieve one or more datasets from an activity.
