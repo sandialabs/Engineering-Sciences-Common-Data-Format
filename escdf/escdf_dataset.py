@@ -240,11 +240,18 @@ class ESCDFDataset:
         if not isinstance(val, bool):
             raise ValueError("`has_modified_properties` must be boolean")
         if self.has_modified_properties and not val:
-            raise ValueError("`cannot reset modified properties once they have been modified")
+            raise ValueError(
+                "`cannot reset modified properties once they have been modified"
+            )
         self._has_modified_properties = val
 
     def __init__(
-        self, name, dataset_type, descriptive_name="", replace_invalid_names=False, **kwargs
+        self,
+        name,
+        dataset_type,
+        descriptive_name="",
+        replace_invalid_names=False,
+        **kwargs,
     ):
         """
         Initialize a specification-driven ESCDF dataset.
@@ -342,7 +349,9 @@ class ESCDFDataset:
                 return
             # Find all canonical property-definition candidates for this
             # property name.
-            property_definitions = _get_candidate_property_definitions(self.dataset_type, name)
+            property_definitions = _get_candidate_property_definitions(
+                self.dataset_type, name
+            )
 
             if len(property_definitions) == 0:
                 # Allow assignment for already-known modified/extra
@@ -468,7 +477,9 @@ class ESCDFDataset:
             if len(property_definition.shape) == 0:
                 size_name = "scalar"
             else:
-                size_name = ",".join([str(dim.value) for dim in property_definition.shape])
+                size_name = ",".join(
+                    [str(dim.value) for dim in property_definition.shape]
+                )
                 for i, dim in enumerate(property_definition.shape):
                     if dim.is_symbolic:
                         try:
@@ -497,7 +508,9 @@ class ESCDFDataset:
                     )
                 )
             # Create the property
-            prop = ESCDFProperty(name, property_definition.datatype, sizes, ragged=is_ragged)
+            prop = ESCDFProperty(
+                name, property_definition.datatype, sizes, ragged=is_ragged
+            )
             try:
                 prop[...] = candidate_data
             except Exception:
@@ -526,7 +539,9 @@ class ESCDFDataset:
 
             if is_equal or len(acceptable_property_definitions) == 1:
                 all_properties.append(prop)
-                type_scores.append(preferred_type_order.index(property_definition.datatype))
+                type_scores.append(
+                    preferred_type_order.index(property_definition.datatype)
+                )
         if len(all_properties) < 1:
             raise ValueError(
                 "Could not build a Property object {:} to match the requested specifications.".format(
@@ -635,7 +650,9 @@ class ESCDFDataset:
             return False
         for prop in self._valid_properties:
             # Check if they are both None
-            num_nones = len([None for obj in [self, other] if getattr(obj, prop) is None])
+            num_nones = len(
+                [None for obj in [self, other] if getattr(obj, prop) is None]
+            )
             if num_nones == 2:  # They are both nones
                 continue  # They are therefore equal
             elif num_nones == 1:  # One is none and the other isn't
@@ -781,7 +798,8 @@ class ESCDFDataset:
         extra_datasets = [
             name
             for name in h5_group.keys()
-            if isinstance(h5_group[name], h5.Dataset) and name not in self._valid_properties
+            if isinstance(h5_group[name], h5.Dataset)
+            and name not in self._valid_properties
         ]
         for extra_dataset in extra_datasets:
             warnings.warn(
@@ -972,7 +990,9 @@ class ESCDFDataset:
                 matching_definitions.append((property_definition, dimension_matches))
 
             if len(matching_definitions) == 1:
-                compatible_dimension_definitions[property_name] = matching_definitions[0]
+                compatible_dimension_definitions[property_name] = matching_definitions[
+                    0
+                ]
 
         column_names = []
         data_array = []
@@ -986,7 +1006,9 @@ class ESCDFDataset:
 
             matched_dimension_index = int(np.where(dimension_matches)[0][0])
             unmatched_dimension_indices = [
-                i for i in range(len(property_definition.shape)) if i != matched_dimension_index
+                i
+                for i in range(len(property_definition.shape))
+                if i != matched_dimension_index
             ]
 
             # Iterate over all remaining dimensions after moving the matched
@@ -1001,7 +1023,9 @@ class ESCDFDataset:
                 index_string = np.empty(len(property_definition.shape), dtype=object)
                 index_string[matched_dimension_index] = ":"
                 index_string[unmatched_dimension_indices] = indices[1:]
-                column_name = property_name + "[" + ",".join(str(v) for v in index_string) + "]"
+                column_name = (
+                    property_name + "[" + ",".join(str(v) for v in index_string) + "]"
+                )
                 column_names.append(column_name)
 
                 if j >= max_columns:
@@ -1116,7 +1140,9 @@ class ESCDFDatasetArray:
                         "If specified, `datasets` must be a 1D iterable of ESCDF Datasets"
                     )
             except (IndexError, TypeError, KeyError):
-                raise ValueError("If specified, `datasets` must be a 1D iterable of ESCDF Datasets")
+                raise ValueError(
+                    "If specified, `datasets` must be a 1D iterable of ESCDF Datasets"
+                )
             self._datasets = [value for value in datasets]
             if len(set(self.names)) != len(self.names):
                 raise ValueError("All dataset names must be unique.")
@@ -1126,19 +1152,23 @@ class ESCDFDatasetArray:
             raise ValueError("Added dataset must be in the form of an ESCDF Dataset")
         if any([ds.name == dataset.name for ds in self.datasets]):
             raise ValueError(
-                "An ESCDF Dataset with the name {:} already exists.".format(dataset.name)
+                "An ESCDF Dataset with the name {:} already exists.".format(
+                    dataset.name
+                )
             )
         self._datasets.append(dataset)
 
     def remove_dataset(self, dataset_identifier):
         if isinstance(dataset_identifier, int):
-            self._datasets.pop(dataset_identifier)
+            return self._datasets.pop(dataset_identifier)
         elif isinstance(dataset_identifier, str):
             try:
                 index = self.names.index(dataset_identifier)
             except ValueError:
-                raise ValueError("No dataset with name {:} was found.".format(dataset_identifier))
-            self._datasets.pop(index)
+                raise ValueError(
+                    "No dataset with name {:} was found.".format(dataset_identifier)
+                )
+            return self._datasets.pop(index)
         else:
             raise ValueError(
                 "Dataset identifier must be either an int or a string specifying the dataset name"
@@ -1154,7 +1184,9 @@ class ESCDFDatasetArray:
             try:
                 index = self.names.index(name_or_index)
             except ValueError:
-                raise ValueError("No dataset with name {:} was found.".format(name_or_index))
+                raise ValueError(
+                    "No dataset with name {:} was found.".format(name_or_index)
+                )
             return self.datasets[index]
         elif isinstance(name_or_index, slice) or isinstance(name_or_index, Ellipsis):
             return ESCDFDatasetArray(self.datasets[name_or_index])
@@ -1167,13 +1199,17 @@ class ESCDFDatasetArray:
         try:
             index = self.names.index(name)
         except ValueError as exc:
-            raise AttributeError("No dataset with name {:} was found.".format(name)) from exc
+            raise AttributeError(
+                "No dataset with name {:} was found.".format(name)
+            ) from exc
         return self.datasets[index]
 
     def repr(self):
         out = "\nESCDF Datasets"
         for dataset in self:
-            out += "\n  {:} ({:} {:})".format(dataset.name, dataset.dataset_type, dataset.version)
+            out += "\n  {:} ({:} {:})".format(
+                dataset.name, dataset.dataset_type, dataset.version
+            )
             out += "\n    {:}".format(", ".join(dataset._valid_properties))
         return out
 

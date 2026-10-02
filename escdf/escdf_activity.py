@@ -294,8 +294,7 @@ class ESCDFActivity:
                     dataset_name
                 )
             )
-        removed = self._data[index]
-        self._data.remove_dataset(index)
+        removed = self._data.remove_dataset(index)
         self._has_pending_changes = True
         return removed
 
