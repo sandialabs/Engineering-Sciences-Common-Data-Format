@@ -737,5 +737,79 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             testCase.verifyTrue(any(strcmp(f.get_activity('act2').get_metadata_links(), 'meta1')));
         end
 
+        function test_rename_metadata_updates_container_and_links(testCase)
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md, 'act1');
+
+            renamed = f.rename_metadata('meta1', 'meta2');
+
+            testCase.verifyEqual(renamed.get_name(), 'meta2');
+            testCase.verifyFalse(any(strcmp(f.get_metadata_names(), 'meta1')));
+            testCase.verifyTrue(any(strcmp(f.get_metadata_names(), 'meta2')));
+            testCase.verifyTrue(any(strcmp(f.get_activity('act1').get_metadata_links(), 'meta2')));
+            testCase.verifyFalse(any(strcmp(f.get_activity('act1').get_metadata_links(), 'meta1')));
+            testCase.verifyTrue(f.get_has_pending_changes());
+        end
+
+        function test_rename_metadata_rejects_invalid_name(testCase)
+            f = escdf();
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md);
+
+            did_error = false;
+            try
+                f.rename_metadata('meta1', 'not valid');
+            catch
+                did_error = true;
+            end
+            testCase.verifyTrue(did_error);
+        end
+
+        function test_rename_activity_updates_container(testCase)
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            renamed = f.rename_activity('act1', 'act2');
+
+            testCase.verifyEqual(renamed.get_name(), 'act2');
+            testCase.verifyFalse(any(strcmp(f.get_activity_names(), 'act1')));
+            testCase.verifyTrue(any(strcmp(f.get_activity_names(), 'act2')));
+            testCase.verifyTrue(f.get_has_pending_changes());
+        end
+
+        function test_activity_rename_data_updates_activity(testCase)
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            activity = escdf_activity('act1', 'Activity one', when);
+            data = escdf_ops_test.make_minimal_data('data1');
+            activity.add_data(data);
+
+            renamed = activity.rename_data('data1', 'data2');
+
+            testCase.verifyEqual(renamed.get_name(), 'data2');
+            testCase.verifyFalse(any(strcmp(activity.get_data_names(), 'data1')));
+            testCase.verifyTrue(any(strcmp(activity.get_data_names(), 'data2')));
+            testCase.verifyTrue(activity.get_has_pending_changes());
+        end
+
+        function test_container_rename_activity_data_delegates(testCase)
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+            data = escdf_ops_test.make_minimal_data('data1');
+            f.add_data_to_activity('act1', data);
+
+            renamed = f.rename_activity_data('act1', 'data1', 'data2');
+
+            testCase.verifyEqual(renamed.get_name(), 'data2');
+            testCase.verifyFalse(any(strcmp(f.get_activity('act1').get_data_names(), 'data1')));
+            testCase.verifyTrue(any(strcmp(f.get_activity('act1').get_data_names(), 'data2')));
+            testCase.verifyTrue(f.get_has_pending_changes());
+        end
+
     end
 end

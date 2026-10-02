@@ -832,3 +832,96 @@ def test_removed_dataset_can_be_moved_to_another_activity(monkeypatch):
     moved = f.activities["act2"]["data1"]
     assert moved.value[...] == np.float64(9.81)
     assert moved.unit[...] == "m/s^2"
+
+
+def test_rename_metadata_updates_container_and_links(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md, activity_to_link="act1")
+
+    renamed = f.rename_metadata("meta1", "meta2")
+
+    assert renamed.name == "meta2"
+    assert "meta1" not in f.metadata.names
+    assert "meta2" in f.metadata.names
+    assert "meta2" in f.activities["act1"].metadata_links
+    assert "meta1" not in f.activities["act1"].metadata_links
+    assert f.has_pending_changes is True
+
+
+def test_rename_metadata_rejects_invalid_name(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+
+    with pytest.raises(ValueError, match="not a valid identifier"):
+        f.rename_metadata("meta1", "not valid")
+
+
+def test_rename_activity_updates_container(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    renamed = f.rename_activity("act1", "act2")
+
+    assert renamed.name == "act2"
+    assert "act1" not in f.activities.names
+    assert "act2" in f.activities.names
+    assert f.has_pending_changes is True
+
+
+def test_activity_rename_data_updates_activity():
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    activity = escdf.Activity("act1", "Activity one", when)
+    data = make_minimal_data("data1")
+    activity.add_data(data)
+
+    renamed = activity.rename_data("data1", "data2")
+
+    assert renamed.name == "data2"
+    assert "data1" not in activity.data.names
+    assert "data2" in activity.data.names
+    assert activity.has_pending_changes is True
+
+
+def test_container_rename_activity_data_delegates(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+    data = make_minimal_data("data1")
+    f.add_data_to_activity("act1", data)
+
+    renamed = f.rename_activity_data("act1", "data1", "data2")
+
+    assert renamed.name == "data2"
+    assert "data1" not in f.activities["act1"].data.names
+    assert "data2" in f.activities["act1"].data.names
+    assert f.has_pending_changes is True

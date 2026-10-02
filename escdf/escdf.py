@@ -423,6 +423,56 @@ class ESCDF:
         self._has_pending_changes = True
         return removed
 
+    def rename_metadata(self, old_name, new_name):
+        """
+        Rename a metadata dataset in the container.
+
+        Parameters
+        ----------
+        old_name : str
+            Current metadata dataset name.
+        new_name : str
+            New metadata dataset name.
+
+        Returns
+        -------
+        ESCDFDataset
+            The renamed metadata dataset object.
+
+        Raises
+        ------
+        ValueError
+            If the old name does not exist, the new name already exists,
+            or the new name is not a valid identifier.
+
+        Notes
+        -----
+        This operation updates the in-memory logical graph only. It does
+        not immediately rename any physical HDF5 backing.
+        """
+        if not isinstance(new_name, str) or not is_valid_identifier(new_name):
+            raise ValueError(
+                f'New metadata name "{new_name}" is not a valid identifier.'
+            )
+
+        if old_name not in self.metadata.names:
+            raise ValueError(f'No metadata dataset named "{old_name}" exists.')
+
+        if new_name in self.metadata.names:
+            raise ValueError(f'A metadata dataset named "{new_name}" already exists.')
+
+        dataset = self.metadata[old_name]
+        dataset.name = new_name
+
+        for activity in self.activities:
+            if old_name in activity.metadata_links:
+                index = activity.metadata_links.index(old_name)
+                activity.metadata_links[index] = new_name
+                activity._has_pending_changes = True
+
+        self._has_pending_changes = True
+        return dataset
+
     def remove_activity(self, activity_name, delete_unlinked_metadata=False):
         """
         Remove an activity from the container.
@@ -476,6 +526,77 @@ class ESCDF:
 
         self._has_pending_changes = True
         return removed
+
+    def rename_activity(self, old_name, new_name):
+        """
+        Rename an activity in the container.
+
+        Parameters
+        ----------
+        old_name : str
+            Current activity name.
+        new_name : str
+            New activity name.
+
+        Returns
+        -------
+        ESCDFActivity
+            The renamed activity object.
+
+        Raises
+        ------
+        ValueError
+            If the old name does not exist, the new name already exists,
+            or the new name is not a valid identifier.
+
+        Notes
+        -----
+        This operation updates the in-memory logical graph only. It does
+        not immediately rename any physical HDF5 backing.
+        """
+        if not isinstance(new_name, str) or not is_valid_identifier(new_name):
+            raise ValueError(
+                f'New activity name "{new_name}" is not a valid identifier.'
+            )
+
+        if old_name not in self.activities.names:
+            raise ValueError(f'No activity named "{old_name}" exists.')
+
+        if new_name in self.activities.names:
+            raise ValueError(f'An activity named "{new_name}" already exists.')
+
+        activity = self.activities[old_name]
+        activity.name = new_name
+        activity._has_pending_changes = True
+        self._has_pending_changes = True
+        return activity
+
+    def rename_activity_data(self, activity_name, old_name, new_name):
+        """
+        Rename a dataset within an activity.
+
+        Parameters
+        ----------
+        activity_name : str
+            Name of the activity to modify.
+        old_name : str
+            Current dataset name.
+        new_name : str
+            New dataset name.
+
+        Returns
+        -------
+        ESCDFDataset
+            The renamed dataset object.
+
+        Notes
+        -----
+        This is a convenience wrapper around the activity-level
+        ``rename_data`` operation.
+        """
+        renamed = self.activities[activity_name].rename_data(old_name, new_name)
+        self._has_pending_changes = True
+        return renamed
 
     def get_activity_data(self, activity_name, data_name=None):
         """

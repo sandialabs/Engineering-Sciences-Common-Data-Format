@@ -196,6 +196,15 @@ class ESCDFDataset:
     def name(self):
         return self._name
 
+    @name.setter
+    def name(self, value):
+        if not isinstance(value, str):
+            raise TypeError("`name` must be a string.")
+        if not is_valid_identifier(value):
+            raise ValueError(f'"{value}" is not a valid identifier.')
+        self._name = value
+        self._has_pending_changes = True
+
     @property
     def dataset_type(self):
         return self._dataset_type
@@ -207,7 +216,7 @@ class ESCDFDataset:
     @descriptive_name.setter
     def descriptive_name(self, value):
         if not isinstance(value, str):
-            raise ValueError("`descriptive_name` must be a string.")
+            raise TypeError("`descriptive_name` must be a string.")
         self._descriptive_name = value
         self._has_pending_changes = True
 
@@ -238,7 +247,7 @@ class ESCDFDataset:
     @has_modified_properties.setter
     def has_modified_properties(self, val):
         if not isinstance(val, bool):
-            raise ValueError("`has_modified_properties` must be boolean")
+            raise TypeError("`has_modified_properties` must be boolean")
         if self.has_modified_properties and not val:
             raise ValueError(
                 "`cannot reset modified properties once they have been modified"

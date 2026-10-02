@@ -379,6 +379,61 @@ classdef escdf < handle
             obj.has_pending_changes = true;
         end
 
+        function renamed = rename_metadata(obj, old_name, new_name)
+        % Rename a metadata dataset in the container.
+        %
+        % Parameters
+        % ----------
+        % old_name : char
+        %     Current metadata dataset name.
+        % new_name : char
+        %     New metadata dataset name.
+        %
+        % Returns
+        % -------
+        % renamed : escdf_dataset
+        %     The renamed metadata dataset object.
+        %
+        % Raises
+        % ------
+        % error
+        %     Raised if the old name does not exist, the new name already
+        %     exists, or the new name is not a valid identifier.
+        if ~(ischar(new_name) || isstring(new_name))
+            error('New metadata name must be a string.');
+        end
+        new_name = char(string(new_name));
+
+        if ~escdf.is_valid_identifier(new_name)
+            error('New metadata name "%s" is not a valid identifier.', new_name);
+        end
+
+        index = obj.get_metadata_index_from_name(old_name);
+        if isempty(index)
+            error('No metadata dataset named "%s" exists.', old_name);
+        elseif length(index) > 1
+            error('Multiple metadata datasets named "%s" exist. How did you get here?', old_name);
+        end
+
+        if any(strcmp(obj.get_metadata_names(), new_name))
+            error('A metadata dataset named "%s" already exists.', new_name);
+        end
+
+        renamed = obj.metadata(index);
+        renamed.set_name(new_name);
+
+        for i = 1:length(obj.activities)
+            activity = obj.activities(i);
+            links = activity.get_metadata_links();
+            match = find(strcmp(links, old_name), 1);
+            if ~isempty(match)
+                activity.rename_metadata_link(old_name, new_name);
+            end
+        end
+
+        obj.has_pending_changes = true;
+        end
+
         function removed = remove_activity(obj, activity_name, delete_unlinked_metadata)
         % Remove an activity from the container.
         %
@@ -436,6 +491,52 @@ classdef escdf < handle
             obj.has_pending_changes = true;
         end
 
+        function renamed = rename_activity(obj, old_name, new_name)
+        % Rename an activity in the container.
+        %
+        % Parameters
+        % ----------
+        % old_name : char
+        %     Current activity name.
+        % new_name : char
+        %     New activity name.
+        %
+        % Returns
+        % -------
+        % renamed : escdf_activity
+        %     The renamed activity object.
+        %
+        % Raises
+        % ------
+        % error
+        %     Raised if the old name does not exist, the new name already
+        %     exists, or the new name is not a valid identifier.
+            if ~(ischar(new_name) || isstring(new_name))
+                error('New activity name must be a string.');
+            end
+            new_name = char(string(new_name));
+
+            if ~escdf.is_valid_identifier(new_name)
+                error('New activity name "%s" is not a valid identifier.', new_name);
+            end
+
+            index = obj.get_activity_index_from_name(old_name);
+            if isempty(index)
+                error('No activity named "%s" exists.', old_name);
+            elseif length(index) > 1
+                error('Multiple activities named "%s" exist. How did you get here?', old_name);
+            end
+
+            if any(strcmp(obj.get_activity_names(), new_name))
+                error('An activity named "%s" already exists.', new_name);
+            end
+
+            renamed = obj.activities(index);
+            renamed.set_name(new_name);
+            renamed.set_has_pending_changes(true);
+            obj.has_pending_changes = true;
+        end
+
         function data = get_activity_data(obj,activity_name,data_name)
         % Retrieve one or more datasets from an activity.
         %
@@ -460,6 +561,32 @@ classdef escdf < handle
             else
                 data = activity.get_data(data_name);
             end
+        end
+
+        function renamed = rename_activity_data(obj, activity_name, old_name, new_name)
+        % Rename a dataset within an activity.
+        %
+        % Parameters
+        % ----------
+        % activity_name : char
+        %     Name of the activity to modify.
+        % old_name : char
+        %     Current dataset name.
+        % new_name : char
+        %     New dataset name.
+        %
+        % Returns
+        % -------
+        % renamed : escdf_dataset
+        %     The renamed dataset object.
+        %
+        % Notes
+        % -----
+        % This is a convenience wrapper around the activity-level
+        % rename_data operation.
+            activity = obj.get_activity_from_name(activity_name);
+            renamed = activity.rename_data(old_name, new_name);
+            obj.has_pending_changes = true;
         end
 
         function value = get.activities(obj)

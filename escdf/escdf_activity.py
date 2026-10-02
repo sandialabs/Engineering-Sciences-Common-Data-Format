@@ -298,6 +298,53 @@ class ESCDFActivity:
         self._has_pending_changes = True
         return removed
 
+    def rename_data(self, old_name, new_name):
+        """
+        Rename a dataset within this activity.
+
+        Parameters
+        ----------
+        old_name : str
+            Current dataset name.
+        new_name : str
+            New dataset name.
+
+        Returns
+        -------
+        ESCDFDataset
+            The renamed dataset object.
+
+        Raises
+        ------
+        ValueError
+            If the old name does not exist, the new name already exists,
+            or the new name is not a valid identifier.
+
+        Notes
+        -----
+        This operation updates only the in-memory logical graph. It does
+        not immediately rename any physical HDF5 backing.
+        """
+        if not isinstance(new_name, str) or not is_valid_identifier(new_name):
+            raise ValueError(
+                f'New dataset name "{new_name}" is not a valid identifier.'
+            )
+
+        if old_name not in self.data.names:
+            raise ValueError(
+                f'No dataset named "{old_name}" exists in activity "{self.name}".'
+            )
+
+        if new_name in self.data.names:
+            raise ValueError(
+                f'A dataset named "{new_name}" already exists in activity "{self.name}".'
+            )
+
+        dataset = self.data[old_name]
+        dataset.name = new_name
+        self._has_pending_changes = True
+        return dataset
+
     def get_data(self, dataset_name=None):
         """
         Retrieve one or more datasets from the activity.

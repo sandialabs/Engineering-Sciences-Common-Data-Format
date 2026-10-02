@@ -158,6 +158,26 @@ classdef escdf_activity < handle
             name = obj.name;
         end
 
+        function set_name(obj, new_name)
+        % Set the activity logical name.
+        %
+        % Parameters
+        % ----------
+        % new_name : char
+        %     New activity name.
+            if ~(ischar(new_name) || isstring(new_name))
+                error('New activity name must be a string.');
+            end
+            new_name = char(string(new_name));
+
+            if ~escdf.is_valid_identifier(new_name)
+                error('New activity name "%s" is not a valid identifier.', new_name);
+            end
+
+            obj.name = new_name;
+            obj.has_pending_changes = true;
+        end
+
         function name = get_descriptive_name(obj)
         % Return the activity descriptive name.
         %
@@ -276,6 +296,62 @@ classdef escdf_activity < handle
             obj.has_pending_changes = true;
         end
 
+        function renamed = rename_data(obj, old_name, new_name)
+        % Rename a dataset within this activity.
+        %
+        % Parameters
+        % ----------
+        % old_name : char
+        %     Current dataset name.
+        % new_name : char
+        %     New dataset name.
+        %
+        % Returns
+        % -------
+        % renamed : escdf_dataset
+        %     The renamed dataset object.
+        %
+        % Raises
+        % ------
+        % error
+        %     Raised if the old name does not exist, the new name already
+        %     exists, or the new name is not a valid identifier.
+        %
+        % Notes
+        % -----
+        % This operation updates only the in-memory logical graph. It does
+        % not immediately rename any physical HDF5 backing.
+            if ~(ischar(new_name) || isstring(new_name))
+                error('New dataset name must be a string.');
+            end
+            new_name = char(string(new_name));
+
+            if ~escdf.is_valid_identifier(new_name)
+                error('New dataset name "%s" is not a valid identifier.', new_name);
+            end
+
+            old_index = [];
+            for i = 1:length(obj.data)
+                if strcmp(obj.data(i).get_name(), old_name)
+                    old_index = i;
+                    break
+                end
+            end
+            if isempty(old_index)
+                error('No dataset named "%s" exists in activity "%s".', old_name, obj.name);
+            end
+
+            for i = 1:length(obj.data)
+                if strcmp(obj.data(i).get_name(), new_name)
+                    error('A dataset named "%s" already exists in activity "%s".', new_name, obj.name);
+                end
+            end
+
+            renamed = obj.data(old_index);
+            renamed.set_name(new_name);
+            obj.has_pending_changes = true;
+        end
+
         function link_names = get_metadata_links(obj)
         % Return names of metadata datasets linked to the activity.
         %
@@ -310,6 +386,27 @@ classdef escdf_activity < handle
             else
                 data = obj.get_data_from_name(dataset_name);
             end
+        end
+
+        function rename_metadata_link(obj, old_name, new_name)
+        % Rename a metadata link within this activity.
+        %
+        % Parameters
+        % ----------
+        % old_name : char
+        %     Existing metadata link name.
+        % new_name : char
+        %     Replacement metadata link name.
+        %
+        % Notes
+        % -----
+        % This updates only the in-memory logical activity state.
+            match = find(strcmp(obj.metadata_links, old_name), 1);
+            if isempty(match)
+                error('Metadata link "%s" was not found in activity "%s".', old_name, obj.name);
+            end
+            obj.metadata_links{match} = new_name;
+            obj.has_pending_changes = true;
         end
 
         function all_data = get_all_data(obj)

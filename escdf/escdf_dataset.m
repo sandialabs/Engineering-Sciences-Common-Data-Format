@@ -126,6 +126,26 @@ classdef escdf_dataset < handle & dynamicprops
             name = obj.name;
         end
 
+        function set_name(obj, new_name)
+        % Set the dataset logical name.
+        %
+        % Parameters
+        % ----------
+        % new_name : char
+        %     New dataset name.
+            if ~(ischar(new_name) || isstring(new_name))
+                error('New dataset name must be a string.');
+            end
+            new_name = char(string(new_name));
+
+            if ~escdf.is_valid_identifier(new_name)
+                error('New dataset name "%s" is not a valid identifier.', new_name);
+            end
+
+            obj.name = new_name;
+            obj.has_pending_changes = true;
+        end
+
         function name = get_descriptive_name(obj)
             name = obj.descriptive_name;
         end
