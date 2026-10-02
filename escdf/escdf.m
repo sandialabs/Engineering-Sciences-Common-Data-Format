@@ -434,6 +434,50 @@ classdef escdf < handle
         obj.has_pending_changes = true;
         end
 
+        function removed = replace_metadata(obj, metadata)
+        % Replace a metadata dataset in the container.
+        %
+        % Parameters
+        % ----------
+        % metadata : escdf_dataset
+        %     Replacement metadata dataset. Its name must match an
+        %     existing metadata dataset in the container.
+        %
+        % Returns
+        % -------
+        % removed : escdf_dataset
+        %     The removed metadata dataset object.
+        %
+        % Raises
+        % ------
+        % error
+        %     Raised if no metadata dataset with the replacement name
+        %     exists in the container.
+        %
+        % Notes
+        % -----
+        % This operation updates the in-memory logical graph only. It does
+        % not immediately modify any physical HDF5 backing.
+            if ~isa(metadata, 'escdf_dataset')
+                error('Replacement metadata must be an escdf_dataset object.');
+            end
+
+            index = obj.get_metadata_index_from_name(metadata.get_name());
+            if isempty(index)
+                error('No metadata dataset named "%s" exists to replace.', metadata.get_name());
+            elseif length(index) > 1
+                error('Multiple metadata datasets named "%s" exist. How did you get here?', metadata.get_name());
+            end
+
+            removed = obj.metadata(index);
+            metadata_to_add = obj.clone_dataset_for_attach(metadata);
+
+            obj.metadata_array(index) = [];
+            obj.metadata_array(end+1) = metadata_to_add;
+
+            obj.has_pending_changes = true;
+        end
+
         function removed = remove_activity(obj, activity_name, delete_unlinked_metadata)
         % Remove an activity from the container.
         %
@@ -586,6 +630,32 @@ classdef escdf < handle
         % rename_data operation.
             activity = obj.get_activity_from_name(activity_name);
             renamed = activity.rename_data(old_name, new_name);
+            obj.has_pending_changes = true;
+        end
+
+        function removed = replace_data_in_activity(obj, activity_name, data)
+        % Replace a dataset within an activity.
+        %
+        % Parameters
+        % ----------
+        % activity_name : char
+        %     Name of the activity to modify.
+        % data : escdf_dataset
+        %     Replacement dataset. Its name must match an existing dataset
+        %     in the activity.
+        %
+        % Returns
+        % -------
+        % removed : escdf_dataset
+        %     The removed dataset object.
+        %
+        % Notes
+        % -----
+        % This operation updates the in-memory container/activity graph
+        % only. It does not immediately modify any physical HDF5 backing.
+            activity = obj.get_activity_from_name(activity_name);
+            data_to_add = obj.clone_dataset_for_attach(data);
+            removed = activity.replace_data(data_to_add);
             obj.has_pending_changes = true;
         end
 

@@ -345,6 +345,42 @@ class ESCDFActivity:
         self._has_pending_changes = True
         return dataset
 
+    def replace_data(self, dataset):
+        """
+        Replace a dataset within this activity.
+
+        Parameters
+        ----------
+        dataset : ESCDFDataset
+            Dataset to use as the replacement. Its name must match an
+            existing dataset in the activity.
+
+        Returns
+        -------
+        ESCDFDataset
+            The removed dataset object.
+
+        Raises
+        ------
+        ValueError
+            If the replacement dataset name does not already exist in the
+            activity.
+
+        Notes
+        -----
+        This operation updates only the in-memory logical graph. It does
+        not immediately modify any physical HDF5 backing.
+        """
+        if dataset.name not in self.data.names:
+            raise ValueError(
+                f'No dataset named "{dataset.name}" exists in activity "{self.name}" to replace.'
+            )
+
+        removed = self.remove_data(dataset.name)
+        self.add_data(dataset)
+        self._has_pending_changes = True
+        return removed
+
     def get_data(self, dataset_name=None):
         """
         Retrieve one or more datasets from the activity.

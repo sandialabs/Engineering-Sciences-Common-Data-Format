@@ -925,3 +925,113 @@ def test_container_rename_activity_data_delegates(monkeypatch):
     assert "data1" not in f.activities["act1"].data.names
     assert "data2" in f.activities["act1"].data.names
     assert f.has_pending_changes is True
+
+
+def test_activity_replace_data_returns_removed_dataset():
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    activity = escdf.Activity("act1", "Activity one", when)
+
+    original = make_minimal_data("data1")
+    original.value = 1.0
+    original.unit = "g"
+    assert original.validate()
+
+    replacement = make_minimal_data("data1")
+    replacement.value = 9.81
+    replacement.unit = "m/s^2"
+    assert replacement.validate()
+
+    activity.add_data(original)
+
+    removed = activity.replace_data(replacement)
+
+    assert removed.name == "data1"
+    assert removed.value[...] == np.float64(1.0)
+    current = activity["data1"]
+    assert current.value[...] == np.float64(9.81)
+    assert current.unit[...] == "m/s^2"
+    assert activity.has_pending_changes is True
+
+
+def test_activity_replace_data_raises_if_missing():
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    activity = escdf.Activity("act1", "Activity one", when)
+
+    replacement = make_minimal_data("missing_data")
+    replacement.value = 9.81
+    replacement.unit = "m/s^2"
+    assert replacement.validate()
+
+    with pytest.raises(ValueError, match="exists in activity"):
+        activity.replace_data(replacement)
+
+
+def test_container_replace_data_in_activity_returns_removed_dataset(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    original = make_minimal_data("data1")
+    original.value = 1.0
+    original.unit = "g"
+    assert original.validate()
+
+    replacement = make_minimal_data("data1")
+    replacement.value = 9.81
+    replacement.unit = "m/s^2"
+    assert replacement.validate()
+
+    f.add_data_to_activity("act1", original)
+    removed = f.replace_data_in_activity("act1", replacement)
+
+    assert removed.value[...] == np.float64(1.0)
+
+    current = f.activities["act1"]["data1"]
+    assert current.value[...] == np.float64(9.81)
+    assert current.unit[...] == "m/s^2"
+    assert f.has_pending_changes is True
+
+
+def test_replace_metadata_returns_removed_dataset(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+
+    original = make_minimal_metadata("meta1")
+    original.test_name = "Original Test"
+    f.add_metadata(original)
+
+    replacement = make_minimal_metadata("meta1")
+    replacement.test_name = "Replacement Test"
+
+    removed = f.replace_metadata(replacement)
+
+    assert removed.test_name[...] == "Original Test"
+    current = f.metadata["meta1"]
+    assert current.test_name[...] == "Replacement Test"
+    assert f.has_pending_changes is True
+
+
+def test_replace_metadata_raises_if_missing(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+
+    replacement = make_minimal_metadata("missing_meta")
+
+    with pytest.raises(ValueError, match="exists to replace"):
+        f.replace_metadata(replacement)

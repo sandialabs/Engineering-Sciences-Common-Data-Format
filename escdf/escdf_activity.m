@@ -352,6 +352,44 @@ classdef escdf_activity < handle
             obj.has_pending_changes = true;
         end
 
+        function removed = replace_data(obj, dataset)
+        % Replace a dataset within this activity.
+        %
+        % Parameters
+        % ----------
+        % dataset : escdf_dataset
+        %     Dataset to use as the replacement. Its name must match an
+        %     existing dataset in the activity.
+        %
+        % Returns
+        % -------
+        % removed : escdf_dataset
+        %     The removed dataset object.
+        %
+        % Raises
+        % ------
+        % error
+        %     Raised if the replacement dataset name does not already
+        %     exist in the activity.
+        %
+        % Notes
+        % -----
+        % This operation updates only the in-memory logical graph. It does
+        % not immediately modify any physical HDF5 backing.
+            if ~isa(dataset, 'escdf_dataset')
+                error('Replacement dataset must be an escdf_dataset object.');
+            end
+
+            if ~any(strcmp(obj.get_data_names(), dataset.get_name()))
+                error('No dataset named "%s" exists in activity "%s" to replace.', ...
+                    dataset.get_name(), obj.name);
+            end
+
+            removed = obj.remove_data(dataset.get_name());
+            obj.add_data(dataset);
+            obj.has_pending_changes = true;
+        end
+
         function link_names = get_metadata_links(obj)
         % Return names of metadata datasets linked to the activity.
         %

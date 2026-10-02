@@ -811,5 +811,108 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             testCase.verifyTrue(f.get_has_pending_changes());
         end
 
+        function test_activity_replace_data_returns_removed_dataset(testCase)
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            activity = escdf_activity('act1', 'Activity one', when);
+
+            original = escdf_ops_test.make_minimal_data('data1');
+            original.value = 1.0;
+            original.unit = {'g'};
+            testCase.verifyTrue(original.validate());
+
+            replacement = escdf_ops_test.make_minimal_data('data1');
+            replacement.value = 9.81;
+            replacement.unit = {'m/s^2'};
+            testCase.verifyTrue(replacement.validate());
+
+            activity.add_data(original);
+
+            removed = activity.replace_data(replacement);
+
+            testCase.verifyEqual(removed.get_name(), 'data1');
+            testCase.verifyEqual(removed.value(:), single(1.0));
+
+            current = activity.get_data('data1');
+            testCase.verifyEqual(current.value(:), 9.81);
+            testCase.verifyEqual(current.unit(:), {'m/s^2'});
+            testCase.verifyTrue(activity.get_has_pending_changes());
+        end
+
+        function test_activity_replace_data_raises_if_missing(testCase)
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            activity = escdf_activity('act1', 'Activity one', when);
+
+            replacement = escdf_ops_test.make_minimal_data('missing_data');
+            replacement.value = 9.81;
+            replacement.unit = {'m/s^2'};
+            testCase.verifyTrue(replacement.validate());
+
+            did_error = false;
+            try
+                activity.replace_data(replacement);
+            catch
+                did_error = true;
+            end
+            testCase.verifyTrue(did_error);
+        end
+
+        function test_container_replace_data_in_activity_returns_removed_dataset(testCase)
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            original = escdf_ops_test.make_minimal_data('data1');
+            original.value = 1.0;
+            original.unit = {'g'};
+            testCase.verifyTrue(original.validate());
+
+            replacement = escdf_ops_test.make_minimal_data('data1');
+            replacement.value = 9.81;
+            replacement.unit = {'m/s^2'};
+            testCase.verifyTrue(replacement.validate());
+
+            f.add_data_to_activity('act1', original);
+            removed = f.replace_data_in_activity('act1', replacement);
+
+            testCase.verifyEqual(removed.value(:), single(1.0));
+
+            current = f.get_activity_data('act1', 'data1');
+            testCase.verifyEqual(current.value(:), 9.81);
+            testCase.verifyEqual(current.unit(:), {'m/s^2'});
+            testCase.verifyTrue(f.get_has_pending_changes());
+        end
+
+        function test_replace_metadata_returns_removed_dataset(testCase)
+            f = escdf();
+
+            original = escdf_ops_test.make_minimal_metadata('meta1');
+            original.test_name = {'Original Test'};
+            f.add_metadata(original);
+
+            replacement = escdf_ops_test.make_minimal_metadata('meta1');
+            replacement.test_name = {'Replacement Test'};
+
+            removed = f.replace_metadata(replacement);
+
+            testCase.verifyEqual(removed.test_name(:), {'Original Test'});
+            current = f.get_metadata('meta1');
+            testCase.verifyEqual(current.test_name(:), {'Replacement Test'});
+            testCase.verifyTrue(f.get_has_pending_changes());
+        end
+
+        function test_replace_metadata_raises_if_missing(testCase)
+            f = escdf();
+
+            replacement = escdf_ops_test.make_minimal_metadata('missing_meta');
+
+            did_error = false;
+            try
+                f.replace_metadata(replacement);
+            catch
+                did_error = true;
+            end
+            testCase.verifyTrue(did_error);
+        end
+
     end
 end

@@ -473,6 +473,47 @@ class ESCDF:
         self._has_pending_changes = True
         return dataset
 
+    def replace_metadata(self, metadata):
+        """
+        Replace a metadata dataset in the container.
+
+        Parameters
+        ----------
+        metadata : ESCDFDataset
+            Replacement metadata dataset. Its name must match an existing
+            metadata dataset in the container.
+
+        Returns
+        -------
+        ESCDFDataset
+            The removed metadata dataset object.
+
+        Raises
+        ------
+        ValueError
+            If no metadata dataset with the replacement name exists in the
+            container.
+
+        Notes
+        -----
+        This operation updates the in-memory logical graph only. It does
+        not immediately modify any physical HDF5 backing.
+        """
+        if metadata.name not in self.metadata.names:
+            raise ValueError(
+                f'No metadata dataset named "{metadata.name}" exists to replace.'
+            )
+
+        index = self.metadata.names.index(metadata.name)
+        removed = self.metadata[index]
+
+        metadata_to_add = self._clone_dataset_for_attach(metadata)
+        self.metadata.remove_dataset(index)
+        self.metadata.add_dataset(metadata_to_add)
+
+        self._has_pending_changes = True
+        return removed
+
     def remove_activity(self, activity_name, delete_unlinked_metadata=False):
         """
         Remove an activity from the container.
@@ -597,6 +638,38 @@ class ESCDF:
         renamed = self.activities[activity_name].rename_data(old_name, new_name)
         self._has_pending_changes = True
         return renamed
+
+    def replace_data_in_activity(self, activity_name, data):
+        """
+        Replace a dataset within an activity.
+
+        Parameters
+        ----------
+        activity_name : str
+            Name of the activity to modify.
+        data : ESCDFDataset
+            Replacement dataset. Its name must match an existing dataset in
+            the activity.
+
+        Returns
+        -------
+        ESCDFDataset
+            The removed dataset object.
+
+        Raises
+        ------
+        ValueError
+            If no dataset with the replacement name exists in the activity.
+
+        Notes
+        -----
+        This operation updates the in-memory container/activity graph only.
+        It does not immediately modify any physical HDF5 backing.
+        """
+        data_to_add = self._clone_dataset_for_attach(data)
+        removed = self.activities[activity_name].replace_data(data_to_add)
+        self._has_pending_changes = True
+        return removed
 
     def get_activity_data(self, activity_name, data_name=None):
         """
