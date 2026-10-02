@@ -911,6 +911,86 @@ class ESCDFDataset:
         self.attachment_names = attachment_names
         self.attachments = np.array(attachments, dtype=object)
 
+    def list_attachment_names(self):
+        """
+        Return the names of all stored attachments.
+
+        Returns
+        -------
+        list of str
+            Attachment names in stored order.
+
+        Raises
+        ------
+        AttributeError
+            If the dataset does not contain attachment properties.
+        """
+        try:
+            attachment_names = self.attachment_names[...]
+        except AttributeError:
+            raise AttributeError("No attachments found in this dataset.")
+        return list(attachment_names)
+
+    def get_attachment_index(self, filename):
+        """
+        Return the index of a stored attachment by name.
+
+        Parameters
+        ----------
+        filename : str
+            Attachment filename to look up.
+
+        Returns
+        -------
+        int
+            Zero-based attachment index.
+
+        Raises
+        ------
+        AttributeError
+            If the dataset does not contain attachment properties.
+        ValueError
+            If the requested attachment name is not present.
+        """
+        names = self.list_attachment_names()
+        try:
+            return names.index(filename)
+        except ValueError as exc:
+            raise ValueError(
+                f'No attachment named "{filename}" found in this dataset.'
+            ) from exc
+
+    def dump_attachment_to_disk(self, filename, file_path="."):
+        """
+        Write a single stored attachment to disk.
+
+        Parameters
+        ----------
+        filename : str
+            Attachment filename to extract.
+        file_path : str, optional
+            Output directory.
+
+        Raises
+        ------
+        AttributeError
+            If the dataset does not contain attachment properties.
+        ValueError
+            If the requested attachment name is not present.
+        """
+        index = self.get_attachment_index(filename)
+        try:
+            attachment_names = self.attachment_names[...]
+            attachments = self.attachments[...]
+        except AttributeError:
+            raise AttributeError("No attachments found in this dataset.")
+
+        attachment_name = attachment_names[index]
+        attachment = attachments[index]
+
+        with open(os.path.join(file_path, attachment_name), "wb") as f:
+            f.write(attachment.tobytes())
+
     def dump_attachments_to_disk(self, file_path="."):
         """
         Write stored attachments to files on disk.

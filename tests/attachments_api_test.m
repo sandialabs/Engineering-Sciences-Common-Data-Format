@@ -83,5 +83,111 @@ classdef attachments_api_test < matlab.unittest.TestCase
 
             testCase.verifyEqual(loaded_md.attachment_names(:), {'hello.bin'; 'numbers.bin'});
         end
+
+        function test_list_attachment_names_returns_all_names(testCase)
+            src1 = fullfile(testCase.temp_folder, 'hello.bin');
+            src2 = fullfile(testCase.temp_folder, 'numbers.bin');
+
+            fid = fopen(src1, 'w');
+            fwrite(fid, uint8('hello world'));
+            fclose(fid);
+
+            fid = fopen(src2, 'w');
+            fwrite(fid, uint8([1 2 3 4 5 255]));
+            fclose(fid);
+
+            md = escdf_dataset('global_meta_with_attachments', 'global_test_attributes');
+            md.test_name = {'test program name'};
+            md.program = {'program abc'};
+            md.hardware_list = {'instr 1'; 'instr 2'};
+            md.point_of_contact = {'tom'; 'jerry'};
+            md.set_attachments({src1, src2});
+
+            testCase.verifyEqual(md.list_attachment_names(), {'hello.bin'; 'numbers.bin'});
+        end
+
+        function test_get_attachment_index_returns_expected_index(testCase)
+            src1 = fullfile(testCase.temp_folder, 'hello.bin');
+            src2 = fullfile(testCase.temp_folder, 'numbers.bin');
+
+            fid = fopen(src1, 'w');
+            fwrite(fid, uint8('hello world'));
+            fclose(fid);
+
+            fid = fopen(src2, 'w');
+            fwrite(fid, uint8([1 2 3 4 5 255]));
+            fclose(fid);
+
+            md = escdf_dataset('global_meta_with_attachments', 'global_test_attributes');
+            md.test_name = {'test program name'};
+            md.program = {'program abc'};
+            md.hardware_list = {'instr 1'; 'instr 2'};
+            md.point_of_contact = {'tom'; 'jerry'};
+            md.set_attachments({src1, src2});
+
+            testCase.verifyEqual(md.get_attachment_index('hello.bin'), 1);
+            testCase.verifyEqual(md.get_attachment_index('numbers.bin'), 2);
+        end
+
+        function test_get_attachment_index_raises_for_missing_name(testCase)
+            src1 = fullfile(testCase.temp_folder, 'hello.bin');
+
+            fid = fopen(src1, 'w');
+            fwrite(fid, uint8('hello world'));
+            fclose(fid);
+
+            md = escdf_dataset('global_meta_with_attachments', 'global_test_attributes');
+            md.test_name = {'test program name'};
+            md.program = {'program abc'};
+            md.hardware_list = {'instr 1'; 'instr 2'};
+            md.point_of_contact = {'tom'; 'jerry'};
+            md.set_attachments({src1});
+
+            did_error = false;
+            try
+                md.get_attachment_index('missing.bin');
+            catch
+                did_error = true;
+            end
+            testCase.verifyTrue(did_error);
+        end
+
+        function test_dump_attachment_to_disk_writes_single_attachment(testCase)
+            src1 = fullfile(testCase.temp_folder, 'hello.bin');
+            src2 = fullfile(testCase.temp_folder, 'numbers.bin');
+
+            fid = fopen(src1, 'w');
+            fwrite(fid, uint8('hello world'));
+            fclose(fid);
+
+            fid = fopen(src2, 'w');
+            fwrite(fid, uint8([1 2 3 4 5 255]));
+            fclose(fid);
+
+            md = escdf_dataset('global_meta_with_attachments', 'global_test_attributes');
+            md.test_name = {'test program name'};
+            md.program = {'program abc'};
+            md.hardware_list = {'instr 1'; 'instr 2'};
+            md.point_of_contact = {'tom'; 'jerry'};
+            md.set_attachments({src1, src2});
+
+            outdir = fullfile(testCase.temp_folder, 'single_extract');
+            mkdir(outdir);
+
+            md.dump_attachment_to_disk('numbers.bin', outdir);
+
+            hello_out = fullfile(outdir, 'hello.bin');
+            numbers_out = fullfile(outdir, 'numbers.bin');
+
+            testCase.verifyFalse(isfile(hello_out));
+            testCase.verifyTrue(isfile(numbers_out));
+
+            fid = fopen(numbers_out, 'r');
+            numbers_bytes = fread(fid, inf, '*uint8');
+            fclose(fid);
+
+            testCase.verifyEqual(numbers_bytes, uint8([1 2 3 4 5 255]).');
+        end
+
     end
 end

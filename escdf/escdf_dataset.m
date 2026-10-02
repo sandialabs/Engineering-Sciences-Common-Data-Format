@@ -502,6 +502,85 @@ classdef escdf_dataset < handle & dynamicprops
             obj.attachment_names = attachment_names(:);
         end
 
+        function attachment_names = list_attachment_names(obj)
+        % Return the names of all stored attachments.
+        %
+        % Returns
+        % -------
+        % attachment_names : cell array of char
+        %     Attachment names in stored order.
+        %
+        % Raises
+        % ------
+        % error
+        %     Raised if the dataset does not contain attachment properties.
+            try
+                attachment_names = obj.attachment_names(:);
+            catch
+                error('No attachments found in this dataset.')
+            end
+        end
+
+        function index = get_attachment_index(obj, filename)
+        % Return the index of a stored attachment by name.
+        %
+        % Parameters
+        % ----------
+        % filename : char
+        %     Attachment filename to look up.
+        %
+        % Returns
+        % -------
+        % index : numeric
+        %     One-based attachment index.
+        %
+        % Raises
+        % ------
+        % error
+        %     Raised if the dataset does not contain attachment properties
+        %     or if the requested attachment name is not present.
+            names = obj.list_attachment_names();
+            index = find(strcmp(names, filename), 1);
+            if isempty(index)
+                error('No attachment named "%s" found in this dataset.', filename)
+            end
+        end
+
+        function dump_attachment_to_disk(obj, filename, file_path)
+        % Write a single stored attachment to disk.
+        %
+        % Parameters
+        % ----------
+        % filename : char
+        %     Attachment filename to extract.
+        % file_path : char, optional
+        %     Output directory.
+        %
+        % Raises
+        % ------
+        % error
+        %     Raised if the dataset does not contain attachment properties
+        %     or if the requested attachment name is not present.
+            if nargin < 3
+                file_path = '';
+            end
+
+            index = obj.get_attachment_index(filename);
+
+            try
+                attachment_names = obj.attachment_names(:);
+                attachments = obj.attachments(:);
+            catch
+                error('No attachments properties found.  Could not write attachments to disk')
+            end
+
+            attachment_name = attachment_names{index};
+            attachment = attachments{index};
+            fid = fopen(fullfile(file_path, attachment_name), 'w');
+            fwrite(fid, attachment, 'uint8');
+            fclose(fid);
+        end
+
         function dump_attachments_to_disk(obj,file_path)
         % Write stored attachments to files on disk.
         %
