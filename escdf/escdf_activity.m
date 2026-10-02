@@ -236,28 +236,44 @@ classdef escdf_activity < handle
             obj.has_pending_changes = true;
         end
 
-        function remove_data(obj,dataset_name)
-        % Remove a dataset from the activity.
+        function removed = remove_data(obj, data_name)
+        % Remove a dataset from this activity.
         %
         % Parameters
         % ----------
-        % dataset_name : char
+        % data_name : char
         %     Name of the dataset to remove.
+        %
+        % Returns
+        % -------
+        % removed : escdf_dataset
+        %     The removed dataset object.
         %
         % Raises
         % ------
         % error
-        %     Raised if no dataset with the requested name exists in the
+        %     Raised if no dataset with the given name exists in the
         %     activity.
-            index = obj.get_data_index_from_name(dataset_name);
-            if isempty(index)
-                error(['Data ',dataset_name,' does not exist in activity ',obj.name])
-            elseif length(index) > 1
-                error(['Multiple datasets links with the same name (',dataset_name,') in activity ',obj.name])
-            else
-                obj.data = remove_array_index(obj.data, index);
-                obj.has_pending_changes = true;
+        %
+        % Notes
+        % -----
+        % This operation removes the dataset from the in-memory activity
+        % graph only. It does not immediately delete any underlying
+        % physical backing from disk.
+            index = [];
+            for i = 1:length(obj.data)
+                if strcmp(obj.data(i).get_name(), data_name)
+                    index = i;
+                    break
+                end
             end
+            if isempty(index)
+                error(['No dataset with name ',data_name,' was found in this activity.'])
+            end
+
+            removed = obj.data(index);
+            obj.data = remove_array_index(obj.data, index);
+            obj.has_pending_changes = true;
         end
 
         function link_names = get_metadata_links(obj)

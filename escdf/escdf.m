@@ -106,6 +106,11 @@ classdef escdf < handle
             out = obj.has_pending_changes;
         end
 
+        function set_has_pending_changes(obj, tf)
+        % Set the container pending-changes flag.
+            obj.has_pending_changes = tf;
+        end
+
         function set_created_properties(obj, created_by, created_date)
         % Set file-level creation metadata.
         %
@@ -292,7 +297,7 @@ classdef escdf < handle
             obj.has_pending_changes = true;
         end
 
-        function remove_data_from_activity(obj, activity_name, data_name)
+        function removed = remove_data_from_activity(obj, activity_name, data_name)
         % Remove a dataset from an activity.
         %
         % Parameters
@@ -301,8 +306,19 @@ classdef escdf < handle
         %     Name of the activity to modify.
         % data_name : char
         %     Name of the dataset to remove.
+        %
+        % Returns
+        % -------
+        % removed : escdf_dataset
+        %     The removed dataset object.
+        %
+        % Notes
+        % -----
+        % This operation removes the dataset from the in-memory container
+        % and activity graph only. It does not immediately delete any
+        % underlying physical backing from disk.
             activity = obj.get_activity_from_name(activity_name);
-            activity.remove_data(data_name);
+            removed = activity.remove_data(data_name);
             obj.has_pending_changes = true;
         end
 

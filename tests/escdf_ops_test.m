@@ -545,6 +545,93 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             H5G.close(activity_group);
             H5F.close(file_id);
         end
-        
+
+        function test_activity_remove_data_returns_removed_dataset(testCase)
+        % Verify that removing data from an activity returns the removed
+        % dataset object and marks the activity as having pending changes.
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            activity = escdf_activity('act1', 'Activity one', when);
+            data = escdf_ops_test.make_minimal_data('data1');
+
+            activity.add_data(data);
+            testCase.verifyTrue(any(strcmp(activity.get_data_names(), 'data1')));
+            testCase.verifyTrue(activity.get_has_pending_changes());
+
+            % Reset to isolate the effect of the remove call.
+            activity.set_has_pending_changes(false);
+
+            removed = activity.remove_data('data1');
+
+            testCase.verifyEqual(removed.get_name(), 'data1');
+            testCase.verifyFalse(any(strcmp(activity.get_data_names(), 'data1')));
+            testCase.verifyTrue(activity.get_has_pending_changes());
+        end
+
+        function test_activity_remove_data_raises_for_missing_dataset(testCase)
+        % Verify that removing a missing dataset raises an error.
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            activity = escdf_activity('act1', 'Activity one', when);
+
+            did_error = false;
+            try
+                activity.remove_data('missing_data');
+            catch
+                did_error = true;
+            end
+
+            testCase.verifyTrue(did_error);
+        end
+
+        function test_container_remove_data_from_activity_returns_removed_dataset(testCase)
+        % Verify that removing data from an activity through the container
+        % returns the removed dataset and marks both activity and container
+        % as having pending changes.
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            data = escdf_ops_test.make_minimal_data('data1');
+            f.add_data_to_activity('act1', data);
+
+            testCase.verifyTrue(any(strcmp(f.get_activity('act1').get_data_names(), 'data1')));
+
+            % Reset to isolate the effect of the remove call.
+            f.set_has_pending_changes(false);
+            f.get_activity('act1').set_has_pending_changes(false);
+
+            removed = f.remove_data_from_activity('act1', 'data1');
+
+            testCase.verifyEqual(removed.get_name(), 'data1');
+            testCase.verifyFalse(any(strcmp(f.get_activity('act1').get_data_names(), 'data1')));
+            testCase.verifyTrue(f.get_activity('act1').get_has_pending_changes());
+            testCase.verifyTrue(f.get_has_pending_changes());
+        end
+
+        function test_removed_dataset_can_be_moved_to_another_activity(testCase)
+        % Verify that a removed dataset object can be moved into another
+        % activity.
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+            f.add_activity('act2', 'Activity two', when);
+
+            data = escdf_ops_test.make_minimal_data('data1');
+            data.value = 9.81;
+            data.unit = {'m/s^2'};
+            testCase.verifyTrue(data.validate());
+
+            f.add_data_to_activity('act1', data);
+            removed = f.remove_data_from_activity('act1', 'data1');
+
+            testCase.verifyFalse(any(strcmp(f.get_activity('act1').get_data_names(), 'data1')));
+
+            f.add_data_to_activity('act2', removed);
+
+            testCase.verifyTrue(any(strcmp(f.get_activity('act2').get_data_names(), 'data1')));
+            moved = f.get_activity_data('act2', 'data1');
+            testCase.verifyEqual(moved.value(:), 9.81);
+            testCase.verifyEqual(moved.unit(:), {'m/s^2'});
+        end
+
     end
 end
