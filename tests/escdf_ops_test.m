@@ -633,5 +633,109 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             testCase.verifyEqual(moved.unit(:), {'m/s^2'});
         end
 
+        function test_remove_metadata_returns_removed_object(testCase)
+            f = escdf();
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md);
+
+            removed = f.remove_metadata('meta1');
+
+            testCase.verifyEqual(removed.get_name(), 'meta1');
+            testCase.verifyFalse(any(strcmp(f.get_metadata_names(), 'meta1')));
+            testCase.verifyTrue(f.get_has_pending_changes());
+        end
+
+        function test_remove_metadata_fails_if_still_linked_without_unlink(testCase)
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md, 'act1');
+
+            did_error = false;
+            try
+                f.remove_metadata('meta1');
+            catch
+                did_error = true;
+            end
+            testCase.verifyTrue(did_error);
+        end
+
+        function test_remove_metadata_with_unlink_removes_links(testCase)
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md, 'act1');
+
+            removed = f.remove_metadata('meta1', true);
+
+            testCase.verifyEqual(removed.get_name(), 'meta1');
+            testCase.verifyFalse(any(strcmp(f.get_metadata_names(), 'meta1')));
+            testCase.verifyFalse(any(strcmp(f.get_activity('act1').get_metadata_links(), 'meta1')));
+            testCase.verifyTrue(f.get_has_pending_changes());
+        end
+
+        function test_remove_activity_returns_removed_object(testCase)
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            removed = f.remove_activity('act1');
+
+            testCase.verifyEqual(removed.get_name(), 'act1');
+            testCase.verifyFalse(any(strcmp(f.get_activity_names(), 'act1')));
+            testCase.verifyTrue(f.get_has_pending_changes());
+        end
+
+        function test_remove_activity_leaves_metadata_by_default(testCase)
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md, 'act1');
+
+            f.remove_activity('act1');
+
+            testCase.verifyFalse(any(strcmp(f.get_activity_names(), 'act1')));
+            testCase.verifyTrue(any(strcmp(f.get_metadata_names(), 'meta1')));
+        end
+
+        function test_remove_activity_can_delete_newly_unlinked_metadata(testCase)
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md, 'act1');
+
+            f.remove_activity('act1', true);
+
+            testCase.verifyFalse(any(strcmp(f.get_activity_names(), 'act1')));
+            testCase.verifyFalse(any(strcmp(f.get_metadata_names(), 'meta1')));
+        end
+
+        function test_remove_activity_keeps_metadata_if_linked_elsewhere(testCase)
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+            f.add_activity('act2', 'Activity two', when);
+
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md);
+            f.link_activity_to_metadata('act1', 'meta1');
+            f.link_activity_to_metadata('act2', 'meta1');
+
+            f.remove_activity('act1', true);
+
+            testCase.verifyFalse(any(strcmp(f.get_activity_names(), 'act1')));
+            testCase.verifyTrue(any(strcmp(f.get_activity_names(), 'act2')));
+            testCase.verifyTrue(any(strcmp(f.get_metadata_names(), 'meta1')));
+            testCase.verifyTrue(any(strcmp(f.get_activity('act2').get_metadata_links(), 'meta1')));
+        end
+
     end
 end

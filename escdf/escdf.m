@@ -322,43 +322,117 @@ classdef escdf < handle
             obj.has_pending_changes = true;
         end
 
-        function remove_metadata(obj,metadata_name)
+        function removed = remove_metadata(obj, metadata_name, unlink)
+        % Remove a metadata dataset from the container.
+        %
+        % Parameters
+        % ----------
+        % metadata_name : char
+        %     Name of the metadata dataset to remove.
+        % unlink : logical, optional
+        %     If true, automatically unlink the metadata from all
+        %     activities before removing it. If false, raise an error if
+        %     the metadata is still linked.
+        %
+        % Returns
+        % -------
+        % removed : escdf_dataset
+        %     The removed metadata dataset object.
+        %
+        % Raises
+        % ------
+        % error
+        %     Raised if no metadata dataset with the given name exists, or
+        %     if the metadata is still linked and unlink is false.
+        %
+        % Notes
+        % -----
+        % This operation removes the metadata from the in-memory container
+        % graph only. It does not immediately delete any underlying
+        % physical backing from disk.
+            if nargin < 3
+                unlink = false;
+            end
+
             index = obj.get_metadata_index_from_name(metadata_name);
             if isempty(index)
-                error(['No metadata with name ',metadata_name])
+                error(['No metadata with name ', metadata_name])
             elseif length(index) > 1
-                error(['Multiple metadata with name ',metadata_name, '.  How did you get here?'])
+                error(['Multiple metadata with name ', metadata_name, '. How did you get here?'])
             end
+
             linked_activities = obj.get_activities_linked_to_metadata(metadata_name);
-            for i = 1:length(linked_activities)
-                obj.unlink_activity_from_metadata(linked_activities{i},metadata_name)
+
+            if ~isempty(linked_activities) && ~unlink
+                error(['Metadata "', metadata_name, '" is still linked to activities ', ...
+                    strjoin(linked_activities, ', '), '. Use unlink=true to remove those links automatically.'])
             end
-            obj.metadata_array = remove_array_index(obj.metadata,index);
+
+            if unlink
+                for i = 1:length(linked_activities)
+                    obj.unlink_activity_from_metadata(linked_activities{i}, metadata_name);
+                end
+            end
+
+            removed = obj.metadata(index);
+            obj.metadata_array = escdf.remove_array_index(obj.metadata_array, index);
             obj.has_pending_changes = true;
         end
 
-        function remove_activity(obj,activity_name,remove_unused_metadata)
+        function removed = remove_activity(obj, activity_name, delete_unlinked_metadata)
+        % Remove an activity from the container.
+        %
+        % Parameters
+        % ----------
+        % activity_name : char
+        %     Name of the activity to remove.
+        % delete_unlinked_metadata : logical, optional
+        %     If true, also remove metadata datasets that were linked only
+        %     to the removed activity and are not linked to any remaining
+        %     activities afterward.
+        %
+        % Returns
+        % -------
+        % removed : escdf_activity
+        %     The removed activity object.
+        %
+        % Raises
+        % ------
+        % error
+        %     Raised if no activity with the given name exists.
+        %
+        % Notes
+        % -----
+        % This operation removes the activity from the in-memory container
+        % graph only. It does not immediately delete any underlying
+        % physical backing from disk.
             if nargin < 3
-                remove_unused_metadata = false;
+                delete_unlinked_metadata = false;
             end
+
             index = obj.get_activity_index_from_name(activity_name);
-            if length(index) > 1
-                error(['Multiple activities with name ',activity_name, '.  How did you get here?'])
-            elseif isempty(index)
-                error(['No activity with name ',activity_name])
+            if isempty(index)
+                error(['No activity with name ', activity_name])
+            elseif length(index) > 1
+                error(['Multiple activities with name ', activity_name, '. How did you get here?'])
             end
-            if remove_unused_metadata
-                activity = obj.activities(index);
-                metadata = activity.get_metadata_links();
-                for i = 1:length(metadata)
-                    md = metadata{i};
+
+            activity = obj.activities(index);
+            linked_metadata = activity.get_metadata_links();
+
+            removed = activity;
+            obj.activities_array = escdf.remove_array_index(obj.activities_array, index);
+
+            if delete_unlinked_metadata
+                for i = 1:length(linked_metadata)
+                    md = linked_metadata{i};
                     linked_activities = obj.get_activities_linked_to_metadata(md);
-                    if length(linked_activities) == 1 && strcmp(linked_activities{1},activity_name)
-                        obj.remove_metadata(md);
+                    if isempty(linked_activities)
+                        obj.remove_metadata(md, false);
                     end
                 end
             end
-            obj.activities_array = remove_array_index(obj.activities_array, index);
+
             obj.has_pending_changes = true;
         end
 
