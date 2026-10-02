@@ -348,9 +348,21 @@ class ESCDF:
             Name of the activity to modify.
         data_name : str
             Name of the dataset to remove.
+
+        Returns
+        -------
+        ESCDFDataset
+            The removed dataset object.
+
+        Notes
+        -----
+        This operation removes the dataset from the in-memory container and
+        activity graph only. It does not immediately delete any underlying
+        physical backing from disk.
         """
-        self.activities[activity_name].remove_data(data_name)
+        removed = self.activities[activity_name].remove_data(data_name)
         self._has_pending_changes = True
+        return removed
 
     def remove_metadata(self, metadata_name, unlink=False):
         """

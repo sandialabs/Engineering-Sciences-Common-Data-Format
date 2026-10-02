@@ -747,3 +747,88 @@ def test_remove_activity_keeps_metadata_if_linked_elsewhere(monkeypatch):
     assert "act2" in f.activities.names
     assert "meta1" in f.metadata.names
     assert "meta1" in f.activities["act2"].metadata_links
+
+
+def test_activity_remove_data_returns_removed_dataset():
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    activity = escdf.Activity("act1", "Activity one", when)
+    data = make_minimal_data("data1")
+
+    activity.add_data(data)
+    assert "data1" in activity.data.names
+    assert activity.has_pending_changes is True
+
+    # Reset to simulate an already-established state before removal.
+    activity._has_pending_changes = False
+
+    removed = activity.remove_data("data1")
+
+    assert removed is data
+    assert "data1" not in activity.data.names
+    assert activity.has_pending_changes is True
+
+
+def test_activity_remove_data_raises_for_missing_dataset():
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    activity = escdf.Activity("act1", "Activity one", when)
+
+    with pytest.raises(ValueError, match="No dataset with name"):
+        activity.remove_data("missing_data")
+
+
+def test_container_remove_data_from_activity_returns_removed_dataset(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    data = make_minimal_data("data1")
+    f.add_data_to_activity("act1", data)
+
+    assert "data1" in f.activities["act1"].data.names
+
+    # Reset to isolate the effect of the remove call.
+    f._has_pending_changes = False
+    f.activities["act1"]._has_pending_changes = False
+
+    removed = f.remove_data_from_activity("act1", "data1")
+
+    assert removed.name == "data1"
+    assert "data1" not in f.activities["act1"].data.names
+    assert f.activities["act1"].has_pending_changes is True
+    assert f.has_pending_changes is True
+
+
+def test_removed_dataset_can_be_moved_to_another_activity(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+    f.add_activity("act2", "Activity two", when)
+
+    data = make_minimal_data("data1")
+    data.value = 9.81
+    data.unit = "m/s^2"
+    assert data.validate()
+
+    f.add_data_to_activity("act1", data)
+    removed = f.remove_data_from_activity("act1", "data1")
+
+    assert "data1" not in f.activities["act1"].data.names
+
+    f.add_data_to_activity("act2", removed)
+
+    assert "data1" in f.activities["act2"].data.names
+    moved = f.activities["act2"]["data1"]
+    assert moved.value[...] == np.float64(9.81)
+    assert moved.unit[...] == "m/s^2"

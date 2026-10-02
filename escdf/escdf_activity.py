@@ -262,19 +262,30 @@ class ESCDFActivity:
 
     def remove_data(self, dataset_name):
         """
-        Remove a dataset from the activity.
+        Remove a dataset from this activity.
 
         Parameters
         ----------
         dataset_name : str
             Name of the dataset to remove.
 
+        Returns
+        -------
+        ESCDFDataset
+            The removed dataset object.
+
         Raises
         ------
         ValueError
-            If no dataset with the requested name exists in the activity.
+            If no dataset with the given name exists in the activity.
+
+        Notes
+        -----
+        This operation removes the dataset from the in-memory activity
+        graph only. It does not immediately delete any underlying physical
+        backing from disk.
         """
-        names = [ds.name for ds in self.data]
+        names = self.data.names
         try:
             index = names.index(dataset_name)
         except ValueError:
@@ -283,8 +294,10 @@ class ESCDFActivity:
                     dataset_name
                 )
             )
+        removed = self._data[index]
         self._data.remove_dataset(index)
         self._has_pending_changes = True
+        return removed
 
     def get_data(self, dataset_name=None):
         """
