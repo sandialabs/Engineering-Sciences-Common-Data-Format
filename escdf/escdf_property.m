@@ -320,12 +320,16 @@ classdef escdf_property < handle
         % -----
         % If the property is already on disk, the method issues a warning
         % and does not rewrite the data.
-            if ~obj.inmemory
-                % TODO: This needs to be updated because it could be on disk but on a different
-                % external hdf5 file.
-                warning('Call to the write_to_disk method is unnecessary as the data is already on disk.  Data was not written.')
+            if strcmp(obj.backing_state, 'hdf5_native') && ~obj.inmemory
+                warning(['This property ',obj.name,' is already on disk and does not need to be written to disk again.'])
                 return
-            else
+            end
+
+            if strcmp(obj.backing_state, 'hdf5_external')
+                obj.read_into_memory();
+            end
+
+             if obj.inmemory
                 if isempty(obj.size)
                     space_id = H5S.create('H5S_SCALAR');
                 else
@@ -351,7 +355,12 @@ classdef escdf_property < handle
                 H5T.close(str_type_id);
                 H5S.close(attr_space_id);
                 obj.backing_state = 'hdf5_native';
+                return
+
             end
+            
+            error('Property %s could not be realized to disk from backing_state %s.', ...
+                obj.name, obj.backing_state);
         end
 
         function obj = read_into_memory(obj)
