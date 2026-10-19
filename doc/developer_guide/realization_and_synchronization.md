@@ -2,468 +2,852 @@
 
 ## Purpose
 
-This document defines the realization and synchronization model for ESCDF
-objects.
+This document defines the preferred direction for realization and
+synchronization in ESCDF.
 
-The goal of this model is to explain how:
+The goal is to describe how the current logical ESCDF object graph is
+compared against a target backing representation, and how the system
+decides whether objects or payloads need to be realized into that target.
 
-- logical in-memory edits
-- backing-state transitions
-- external/native property relationships
-- draft working state
+This document supersedes earlier realization notes that centered on
+manually maintained flags such as `has_pending_changes` or static backing
+states such as `hdf5_native` and `hdf5_external`.
 
-become coherent persisted state in memory or on disk.
+The preferred direction is:
 
-This model builds on:
-
-- the canonical specification model
-- the canonical validation model
-- the storage/backing/lifecycle/mutation model
-
-This model is intended to be implemented in both Python and MATLAB.
+> Realization state should be derived from comparing the current logical
+> graph against a requested target backing representation, rather than
+> maintained as a mutable flag.
 
 ---
 
-## Relationship to Existing Models
+## Core Design Principle
 
-### Canonical specification model
-Defines:
-- what the object graph is allowed to contain
-- specification inheritance and validation semantics
+ESCDF should avoid storing contextual relationship states like:
 
-### Storage/backing/lifecycle model
-Defines:
-- property backing states
-- dataset/activity/container backing states
-- lifecycle and mutability
+- native
+- external
+- pending realization
 - pending changes
 
-### Realization/synchronization model
-Defines:
-- when and how logical edits become coherent persisted state
-- how external/native-backed objects are materialized
-- how the in-memory graph is reconciled with target storage
+as authoritative object state whenever those values can be derived from
+more concrete information.
+
+Instead, ESCDF should store or derive:
+
+- the current logical location of an object in the in-memory object graph
+- the current backing location of an object, if any
+- the requested realization target
+
+Then, at the time an operation is performed, ESCDF should derive:
+
+- whether an object is in memory
+- whether an object is already realized at the target
+- whether an object needs realization
+- whether a backing source is external relative to the target
 
 ---
 
-## Design Philosophy
+## Logical Graph vs Backing Graph
 
-### 1. Logical edits happen first
-CRUD and editing operations are first interpreted as mutations of the
-in-memory object graph.
-
-Examples:
-- remove metadata from a container
-- rename an activity
-- replace an activity dataset
-- attach a copied dataset to a different container
-
-These operations do **not** immediately imply physical mutation of an
-existing HDF5 backing file.
-
-### 2. Synchronization is explicit
-Persistence of the current logical object graph into a coherent backing
-representation should happen only through explicit realization or
-synchronization operations.
-
-Examples:
-- `write_to_disk(...)`
-- a future `synchronize(...)` operation
-- a future explicit materialization operation
-
-### 3. First realization model should be simple and safe
-The first realization model should prefer:
-- full coherent rewrite to a target
-over:
-- incremental in-place mutation of existing HDF5 structures
-
-This is safer and more predictable, especially while lifecycle and backing
-semantics are still being expanded.
-
-### 4. External-backed payloads are allowed in memory
-A container/dataset/property may temporarily exist in a logically edited
-state while some payloads are still externally backed.
-
-That is acceptable as an intermediate editing state.
-
-### 5. Realization should eventually support more efficient strategies
-Once the semantics are stable, realization may later evolve to:
-- direct HDF5-to-HDF5 copy
-- append-friendly extensible arrays
-- partial synchronization
-- streamed materialization
-
-But the first model should not depend on those optimizations.
+ESCDF objects exist simultaneously in two conceptual graphs.
 
 ---
 
-## Core Concepts
+## Logical graph
 
-## 1. Logical state
-The current in-memory object graph:
-- container
-- metadata datasets
-- activities
-- activity datasets
-- property objects
-
-This is the user-facing editable state.
-
-## 2. Authoritative persisted/reference state
-The most recent native persisted state or loaded state from which the
-current object graph conceptually derives.
-
-Examples:
-- a container freshly loaded from file
-- a container just written to disk
-- a newly created in-memory object with no persisted state yet
-
-## 3. Pending changes
-Indicates that the logical in-memory state differs from the last
-authoritative persisted/reference state.
-
-## 4. Realization
-The act of turning the current logical state into a coherent native
-representation.
-
-Examples:
-- write current in-memory graph to a file
-- materialize an externally backed property into native memory or native
-  HDF5
-- realize renamed or removed objects by producing a rewritten container
-  image
-
-## 5. Synchronization
-A higher-level term for reconciling current logical state with some
-backing target.
-
-For the first model, synchronization is effectively:
-- coherent write/rewrite to target
-
-Later it may include incremental or partial realization strategies.
-
----
-
-## Backing-State Interpretation During Synchronization
-
-## Property-level backing states
-Properties currently use:
-
-- `memory`
-- `hdf5_native`
-- `hdf5_external`
-
-### Meaning for realization
-
-#### `memory`
-Property payload is already in native in-memory form and can be written to
-the current target directly.
-
-#### `hdf5_native`
-Property payload is backed by HDF5 storage that is native to the current
-object context.
-
-In a rewrite model, this may still be copied into a newly written target
-rather than preserved in-place.
-
-#### `hdf5_external`
-Property payload is readable from an external HDF5 source but is not
-native to the current target context.
-
-Before the current logical state can be realized coherently into a new
-native target, such a property must be copied/materialized into that
-target.
-
----
-
-## Dataset/activity/container backing states
-At the dataset, activity, and container levels, backing state indicates
-where the object itself is currently considered to live.
-
-Examples:
-- `memory`
-- `hdf5_native`
-- later possibly `hdf5_external`
-
-These higher-level backing states do **not** replace property-level
-backing states; they complement them.
-
----
-
-## First Synchronization Model
-
-## Principle
-The first synchronization model should treat the current in-memory object
-graph as authoritative and should produce a **coherent target image**
-without mutating source backing in place.
-
-### Consequences
-- removed objects are omitted from the next write
-- renamed objects are written under new names in the next write
-- replaced objects are written as their replacement versions
-- externally backed properties are copied/materialized into the new target
-- source files remain untouched unless a future explicit in-place sync mode
-  is introduced
-
-This is the safest first model.
-
----
-
-## What `write_to_disk(...)` should mean
-
-For the first model, `write_to_disk(path)` should mean:
-
-> Write the current logical object graph to a coherent target file at
-> `path`, materializing any required external-backed payloads and using the
-> current in-memory names/links/contents as the truth.
-
-### It should not mean
-- patch the original loaded file in place
-- delete old groups from the source file
-- rename source groups in place
-- rewrite only one edited child object while preserving all original group
-  layout implicitly
-
-Those behaviors are future possibilities, not first-model semantics.
-
----
-
-## Realization of CRUD Operations
-
-## Remove
-When an object is removed from the in-memory graph:
-- it is no longer included in the next realized target
-- the removed object may still exist as a detached in-memory object
-- its original physical backing is not destroyed immediately
-
-### Example
-Removing metadata from a container:
-- updates logical graph
-- next write omits the metadata
-- source HDF5 backing is left untouched unless a future in-place sync mode
-  explicitly removes it
-
----
-
-## Rename
-When an object is renamed in the in-memory graph:
-- its logical name changes immediately
-- next write emits the object under the new name
-- original source HDF5 group/dataset naming is not changed immediately
-
-### Example
-Renaming metadata:
-- metadata object name changes
-- metadata links in activities are updated in memory
-- next write emits the metadata under the new group name
-
----
-
-## Replace
-When an object is replaced in the in-memory graph:
-- old logical object is removed from that slot
-- replacement object is inserted
-- next write emits only the replacement
-- old source backing is not destroyed immediately
-
----
-
-## Attach / copy
-When an object is attached/copied into a new container:
-- a new wrapper object is created
-- property wrappers are cloned
-- externally/native-backed relationships are adjusted
-- next write materializes the attached object into the target file if
-  needed
-
----
-
-## External-Backed Property Realization
-
-## First-pass rule
-Any `hdf5_external` property that is included in a write target must be
-materialized/copied into the target.
-
-### Current acceptable first-pass behavior
-- read/copy into native memory if necessary
-- then write out to the target HDF5 dataset/group
-
-### Future optimized behavior
-- direct HDF5-to-HDF5 copy where possible
-- streamed copy for large datasets
-- chunk-aware realization
-
-The first model does not require these optimizations.
-
----
-
-## Assignment vs Synchronization
-
-## Assignment
-Property assignment may trigger local materialization behavior.
+The logical graph is the current in-memory ESCDF object graph.
 
 Example:
-- assigning to an `hdf5_external` property may first materialize it into
-  native memory
 
-This is a **local mutation-time realization**.
+```text
+ESCDF container
+├── metadata
+│   └── geometry
+│       ├── node_id
+│       └── node_position
+└── activities
+    └── modal_test
+        └── data
+            └── time_data
+                ├── abscissa
+                └── ordinate
+```
 
-## Synchronization
-Container/file write is a **global realization** step:
-- gather current logical graph
-- realize any remaining external-backed content into the target
-- clear pending changes on success
+The logical graph is the user-facing editable object graph.
 
-These are distinct but related operations.
+Logical operations include:
 
----
+- add metadata
+- remove metadata
+- rename metadata
+- replace metadata
+- add activity
+- remove activity
+- rename activity
+- add data to activity
+- remove data from activity
+- rename data
+- replace data
 
-## Pending-Changes Semantics
+These operations change the logical graph.
 
-## Container-level
-`has_pending_changes = true` means:
-- the in-memory container graph has changed relative to the last
-  authoritative persisted/reference state
-- a future write/sync is needed to realize current edits coherently
-
-## Dataset/activity-level
-`has_pending_changes = true` means:
-- this subobject has changed relative to its last authoritative state
-
-These lower-level flags may be used later for more selective sync
-strategies, but the first model does not require partial synchronization.
-
-## Property-level
-In the current simplified first model, property-level change tracking is
-not a separate top-level flag. Property state changes are represented via:
-- current backing state
-- in-memory content
-- and the enclosing dataset/container pending-changes flags
-
----
-
-## Successful Synchronization
-
-After a successful full realization/write:
-
-### Container
-- `backing_state` becomes native HDF5-backed
-- `has_pending_changes = false`
-
-### Activities
-- `backing_state` becomes native HDF5-backed
-- `has_pending_changes = false`
-
-### Datasets
-- `backing_state` becomes native HDF5-backed
-- `has_pending_changes = false`
-
-### Properties
-- `backing_state` becomes `hdf5_native`
-- external/native ambiguity is resolved for the new target
-
-This is the intended clean post-write state.
+They should not automatically imply immediate mutation of the source HDF5
+file.
 
 ---
 
-## Loaded Objects
+## Backing graph
 
-After load from a native HDF5 file:
+The backing graph describes where the data or structure currently exists
+physically.
 
-### Container
-- `backing_state = hdf5_native`
-- `lifecycle_state = draft` in the first implementation until finalized
-  semantics are added
-- `mutability_state` depends on open mode
-- `has_pending_changes = false`
+Examples:
 
-### Activity
-- `backing_state = hdf5_native`
-- `has_pending_changes = false`
+```text
+source_file.h5::/geometry/node_id
+source_file.h5::/activities/modal_test/time_data/ordinate
+```
 
-### Dataset
-- `backing_state = hdf5_native`
-- `has_pending_changes = false`
+Backing locations may refer to:
 
-### Property
-- `backing_state = hdf5_native`
+- an HDF5 file
+- an HDF5 group
+- an HDF5 dataset
+- an in-memory payload, represented by the absence of an HDF5 backing
+  location
 
-This is the clean initial loaded state.
+The backing graph is not necessarily the same as the logical graph.
 
----
-
-## Finalized and Read-Only Files
-
-## Finalized
-Finalized files should eventually be treated as canonical frozen states.
-
-In the first realization model, finalized behavior may be mostly
-conceptual/documented if full enforcement is not yet implemented.
-
-Eventually, the model should support:
-- refusing direct mutating synchronization into a finalized source
-- requiring edit-by-clone or explicit draft copy
-
-## Read-only
-Read-only mode should prevent accidental mutating writes to the current
-native source context.
-
-Even before full finalized semantics exist, read-only loading should be
-compatible with:
-- inspection
-- export
-- attach/copy into new editable draft containers
+For example, a metadata dataset may be logically attached to a new
+container while its properties are still backed by an HDF5 source file
+loaded earlier.
 
 ---
 
-## What Synchronization Does Not Yet Solve
+## Object Locations
 
-The first synchronization model intentionally does **not** yet solve:
-
-- in-place mutation of existing native HDF5 source files
-- incremental rewrite of only edited subtrees
-- append/extend semantics for variable-sized arrays
-- efficient mutation of attachment arrays
-- partial realization policies for very large datasets
-- automatic conflict handling across multiple independently edited aliases
-
-Those belong to later phases.
+The preferred model uses locations rather than persistent native/external
+flags.
 
 ---
 
-## Future Extensions
+## Logical location
 
-Once the first model is stable, the following may be added:
+A logical location describes where an object currently lives in the
+in-memory ESCDF graph.
 
-### 1. Direct native sync / in-place update mode
-An explicit mode where the current native backing is mutated directly,
-subject to lifecycle and mutability rules.
+Examples:
 
-### 2. Efficient external-backed copy
-HDF5-to-HDF5 direct copy or streamed copy for large properties.
+```text
+/metadata/geometry
+/metadata/geometry/node_position
+/activities/modal_test
+/activities/modal_test/time_data
+/activities/modal_test/time_data/ordinate
+```
 
-### 3. Extensible array support
-For attachment growth and other append-like workflows.
+A logical location is meaningful only with respect to a particular
+container object graph.
 
-### 4. Partial synchronization
-Synchronize only changed datasets/properties where safe.
+Two datasets with the same local name are not necessarily the same
+logical object unless they also share the same logical parent/context.
 
-### 5. Finalized-file enforcement
-Require explicit cloning/draft transitions before edits.
+---
+
+## Backing location
+
+A backing location describes where an object currently has physical
+storage.
+
+Examples:
+
+```text
+source_file.h5::/metadata/geometry
+source_file.h5::/metadata/geometry/node_position
+source_file.h5::/activities/modal_test/time_data/ordinate
+```
+
+For memory-backed objects, the backing location may be `None`.
+
+A backing location should contain enough information to distinguish:
+
+- file A vs file B
+- group `/metadata/geometry` in one file vs the same path in another file
+- dataset `/ordinate` in one dataset group vs another
+
+A backing location may be implemented as a small value object or struct
+containing:
+
+- backing kind, such as `hdf5`
+- file identity or file path
+- HDF5 object path
+- optionally an HDF5 object identifier or token
+
+The exact implementation may evolve, but the conceptual role should
+remain stable.
+
+---
+
+## In-Memory Objects
+
+An in-memory object has no HDF5 backing location.
+
+For example:
+
+```text
+backing_location = None
+```
+
+This means:
+
+- the object or payload is currently represented in memory
+- it is already realized with respect to its current memory
+  representation
+- it may still need realization if the target is an HDF5 file
+
+In-memory does not necessarily mean free or unattached.
+
+For example, a property can have:
+
+```text
+logical_parent = some dataset
+backing_location = None
+```
+
+which means the property belongs to the dataset logically but its payload
+is currently stored in memory.
+
+---
+
+## Free Objects
+
+An object is free or unattached when it has no logical parent.
+
+Example:
+
+```text
+logical_parent = None
+```
+
+This is distinct from being memory-backed.
+
+A free object may still have an HDF5 backing location if it was loaded or
+detached from a file, depending on how the API creates or returns it.
+
+---
+
+## Derived State
+
+The following concepts should be derived at runtime rather than stored as
+authoritative flags.
+
+---
+
+## In memory
+
+An object is considered in memory if it has no HDF5 backing location.
+
+```text
+in_memory = backing_location is None
+```
+
+---
+
+## Realized at target
+
+An object is realized at a target when its current backing location
+matches the backing location implied by the requested target.
+
+Example:
+
+```text
+property.backing_location == target_group / property.name
+```
+
+If true, the property is already physically present at the requested
+target location.
+
+---
+
+## External relative to target
+
+An object is external relative to a target when it has an HDF5 backing
+location but that backing location does not match the target location
+being realized.
+
+Example:
+
+```text
+property.backing_location = source_file.h5::/metadata/geometry/node_id
+target_location           = target_file.h5::/metadata/geometry/node_id
+
+property is external relative to target
+```
+
+External is therefore not an intrinsic object property. It is a derived
+relationship between a backing location and a target location.
+
+---
+
+## Needs realization
+
+An object needs realization relative to a target if:
+
+- it is memory-backed and the target is persistent HDF5 storage
+- its backing location differs from the target location
+- one or more of its children need realization
+- the target lacks required children that exist in the logical graph
+- the target contains conflicting content and no overwrite/sync policy has
+  been requested
+
+This should be implemented as a method or computed property, not as a
+manually maintained mutable flag.
+
+Example:
+
+```text
+needs_realization(target) =
+    not is_realized_at(target)
+    OR any child needs realization at its corresponding child target
+```
+
+---
+
+## Pending Changes
+
+Earlier designs used `has_pending_changes` as a mutable flag.
+
+The preferred direction is to avoid using manually maintained pending
+change flags as the authoritative synchronization mechanism.
+
+Reason:
+
+- every editing operation would need to remember to update the flag
+- flags can become desynchronized from actual object state
+- changes such as rename, remove, replace, attach, and property assignment
+  are better evaluated by comparing logical and backing graphs
+
+If a UI or user-facing API later needs a convenience indicator such as
+`needs_save`, that should ideally be derived from:
+
+```text
+needs_realization(current_target)
+```
+
+rather than maintained independently.
+
+---
+
+## Equality and Identity
+
+ESCDF should distinguish several kinds of equality.
+
+---
+
+## Object identity
+
+Object identity means two references point to the same programming object.
+
+Python:
+
+```text
+a is b
+```
+
+MATLAB:
+
+```text
+same handle object
+```
+
+Object identity is not the same as value equality.
+
+---
+
+## Semantic equality
+
+Semantic equality should answer:
+
+```text
+Do these objects contain the same ESCDF content?
+```
+
+For example, two independently loaded copies of the same file should
+generally be semantically equal.
+
+Semantic equality should compare:
+
+- object type
+- names and descriptive metadata where appropriate
+- child objects
+- property values
+- links and relationships
+
+Semantic equality should not necessarily require the same backing
+location.
+
+---
+
+## Logical-location equality
+
+Logical-location equality should answer:
+
+```text
+Do these objects occupy the same logical position in the same object graph?
+```
+
+For example:
+
+```text
+file_a.metadata["geometry"]
+file_b.metadata["geometry"]
+```
+
+may be semantically equal but should not be considered the same logical
+location unless they belong to the same logical container context.
+
+---
+
+## Backing-location equality
+
+Backing-location equality should answer:
+
+```text
+Do these objects refer to the same physical backing location?
+```
+
+For HDF5-backed objects, this means:
+
+- same file identity
+- same HDF5 object path
+
+This relationship is critical for synchronization and realization.
+
+---
+
+## Recommended Equality Semantics
+
+The default equality operator should probably represent semantic equality.
+
+Separate helpers should be used for other relationships, such as:
+
+```text
+same_logical_location_as(other)
+same_backing_location_as(other)
+is same object / handle identity
+```
+
+This avoids overloading one equality operator with too many meanings.
+
+---
+
+## Assignment Semantics
+
+Assignment must be safe with respect to backing locations.
+
+---
+
+## Property assignment
+
+When assigning to a property:
+
+```text
+property[...] = value
+```
+
+the system should determine whether the current backing location may be
+safely mutated.
+
+A conceptual decision tree is:
+
+```text
+assign(property, value)
+├── property has no HDF5 backing
+│   └── write into memory
+│
+├── property backing location matches its current logical target
+│   └── write through to HDF5 if mutability rules allow it
+│
+└── property backing location does not match logical target
+    ├── do not write through to the backing source
+    ├── materialize/detach into memory or a native target
+    └── write the new value there
+```
+
+This avoids accidentally mutating a source file when a property has been
+attached or copied into a different logical context.
+
+---
+
+## In-memory aliases
+
+If a user creates an ordinary alias:
+
+```text
+property_alias = property
+```
+
+then both names refer to the same object.
+
+Mutating through either alias mutates the same object.
+
+This is ordinary programming-language reference behavior.
+
+---
+
+## Explicit copies
+
+If a dataset or property is explicitly copied or attached into a new
+container, the system should create new wrapper objects.
+
+For first-pass behavior:
+
+- HDF5-backed payloads may share the same backing location until realized
+- memory-backed payloads should be eagerly copied
+- future implementations may introduce copy-on-write memory backing if
+  needed
+
+This means:
+
+```text
+aliasing by assignment
+```
+
+and
+
+```text
+copying by attach/copy API
+```
+
+have different semantics.
+
+---
+
+## Attach and Copy Semantics
+
+When an object is attached or copied into a different container:
+
+```text
+target.add_metadata(source_metadata)
+```
+
+the operation should:
+
+- create a new wrapper object for the target logical graph
+- assign the new wrapper a logical location in the target graph
+- preserve backing locations from the source where practical
+- avoid mutating the source backing
+- allow realization later into the target backing
+
+This means the new object may have:
+
+```text
+logical_location = target_file::/metadata/geometry
+backing_location = source_file.h5::/metadata/geometry
+```
+
+This is a valid intermediate state.
+
+---
+
+## Remove Semantics
+
+Remove operations mutate the logical graph.
+
+Example:
+
+```text
+remove_metadata("geometry")
+```
+
+First-pass semantics:
+
+- remove the object from the in-memory logical graph
+- return the removed object where useful
+- do not delete the original HDF5 backing immediately
+- next full realization/write omits the removed object
+
+Removed objects may still exist as free objects if the caller keeps a
+reference.
+
+---
+
+## Rename Semantics
+
+Rename operations mutate the logical graph.
+
+Example:
+
+```text
+rename_metadata("geometry", "geometry_v2")
+```
+
+First-pass semantics:
+
+- update the object's logical name
+- update logical references such as metadata links
+- do not rename any HDF5 group immediately
+- next realization/write emits the object under the new name
+
+---
+
+## Replace Semantics
+
+Replace operations mutate the logical graph.
+
+Example:
+
+```text
+replace_data_in_activity("modal", replacement_dataset)
+```
+
+First-pass semantics:
+
+- remove the old logical child
+- attach/copy the replacement into the logical graph
+- return the removed object where useful
+- do not delete or mutate the old backing immediately
+- next realization/write emits the replacement
+
+---
+
+## Realization
+
+Realization is the process of producing a coherent backing representation
+from the current logical graph.
+
+For first-pass ESCDF behavior, realization should generally mean:
+
+```text
+write the current logical graph into a coherent target HDF5 file
+```
+
+The source backing files should not be mutated implicitly.
+
+---
+
+## Property realization
+
+A property realization decision should be target-aware.
+
+Conceptual decision tree:
+
+```text
+realize_property_to_hdf5(property, target_group)
+├── expected_target = target_group / property.name
+│
+├── property has no HDF5 backing
+│   └── write memory payload to expected_target
+│
+├── property backing location == expected_target
+│   └── already realized; skip or update metadata if needed
+│
+├── target already contains property.name
+│   └── raise unless an explicit overwrite/sync policy is requested
+│
+└── property backing location != expected_target
+    └── copy/materialize source backing into expected_target
+        first pass: read into memory then write
+        future: direct HDF5 copy or streamed copy
+```
+
+This is safer than using a stored `native` or `external` flag.
+
+---
+
+## Dataset realization
+
+Dataset realization should:
+
+- compute the target HDF5 group location for the dataset
+- realize each present property into that group
+- omit properties that are absent in the logical graph
+- handle extra/noncanonical properties according to the modified-property
+  policy
+
+Conceptual decision tree:
+
+```text
+realize_dataset_to_hdf5(dataset, target_parent_group)
+├── target_group = target_parent_group / dataset.name
+├── create target_group if needed
+├── for each present property:
+│   └── realize_property_to_hdf5(property, target_group)
+└── omit absent properties
+```
+
+---
+
+## Activity realization
+
+Activity realization should:
+
+- compute the target activity group
+- write activity metadata such as descriptive name and date
+- write metadata links
+- realize each activity dataset
+
+Conceptual decision tree:
+
+```text
+realize_activity_to_hdf5(activity, activities_group)
+├── target_group = activities_group / activity.name
+├── create target_group if needed
+├── write activity attributes
+├── write metadata links
+└── for each dataset:
+    └── realize_dataset_to_hdf5(dataset, target_group)
+```
+
+---
+
+## Container realization
+
+Container realization should:
+
+- treat the current logical graph as authoritative
+- create/write a coherent target HDF5 file
+- realize metadata datasets
+- realize activities and activity datasets
+- omit removed objects
+- write renamed objects under current logical names
+
+Conceptual decision tree:
+
+```text
+realize_container_to_hdf5(container, target_file)
+├── create target file or target root group
+├── write file-level attributes
+├── for each metadata dataset in logical graph:
+│   └── realize_dataset_to_hdf5(metadata, target_file)
+├── create activities group
+└── for each activity in logical graph:
+    └── realize_activity_to_hdf5(activity, activities_group)
+```
+
+---
+
+## First-Pass Synchronization Policy
+
+The first synchronization model should prefer full coherent target
+realization.
+
+That means:
+
+- current logical graph is authoritative
+- removed objects are omitted
+- renamed objects are written under new logical names
+- replaced objects are written as replacements
+- external backing sources are copied/materialized
+- source files are not modified in place
+
+This avoids premature complexity around partial in-place updates.
+
+---
+
+## Future Synchronization Strategies
+
+Future implementations may add:
+
+- in-place synchronization for editable draft files
+- direct HDF5-to-HDF5 copy
+- streamed copy for large datasets
+- chunk-aware copy
+- appendable/extensible datasets
+- partial synchronization
+- attachment append/remove without full materialization
+
+These should be added behind the realization abstraction rather than
+spread across high-level CRUD operations.
+
+---
+
+## Non-Mutating Attachment Helpers
+
+Non-mutating attachment operations are safe under this model.
+
+Examples:
+
+- list attachment names
+- get attachment index
+- dump one attachment to disk
+- dump all attachments to disk
+
+Mutating attachment operations such as:
+
+- add attachment
+- remove attachment
+- replace attachment
+- clear attachments
+
+should wait until extensible arrays or a well-defined property mutation
+realization strategy exists.
+
+---
+
+## Implementation Direction
+
+The preferred implementation direction is:
+
+1. Store or derive logical locations.
+2. Store backing locations for HDF5-backed objects.
+3. Use `None` or equivalent for memory-backed payloads.
+4. Derive in-memory/native/external status at operation time.
+5. Implement `is_realized_at(target)` helpers.
+6. Implement `needs_realization(target)` helpers.
+7. Make realization target-aware.
+8. Avoid maintaining mutable realization flags that can desynchronize.
+
+---
+
+## Migration From Earlier Backing-State Model
+
+Earlier first-pass implementations used static states such as:
+
+```text
+memory
+hdf5_native
+hdf5_external
+```
+
+Those were useful for early experimentation but should not remain the
+long-term source of truth.
+
+The direction should be to replace those static states with:
+
+```text
+backing_location = None or HDF5Location(...)
+logical_location = derived from logical parent graph
+```
+
+Then:
+
+```text
+in_memory       = backing_location is None
+native/external = comparison between backing_location and target location
+realized        = backing_location == target location
+```
 
 ---
 
 ## Summary
 
-The first-pass realization/synchronization model should:
+The realization and synchronization model should be target-aware and
+derived from concrete locations.
 
-- treat the current logical in-memory object graph as authoritative
-- realize edits by writing a coherent new native target representation
-- not immediately mutate source HDF5 backing during logical edits
-- materialize/copy any external-backed properties needed for the target
-- clear pending-change flags on successful write
-- leave room for future optimized, partial, or in-place synchronization
-  strategies
+The core idea is:
 
-This model provides the next necessary layer after logical CRUD semantics
-and before advanced out-of-core or finalized-file behavior.
+```text
+logical graph + backing locations + target location
+    → derive realization requirements
+```
+
+rather than:
+
+```text
+manually maintained native/external/pending flags
+```
+
+This should reduce desynchronization risk and provide a stronger
+foundation for future out-of-core and synchronization workflows.
