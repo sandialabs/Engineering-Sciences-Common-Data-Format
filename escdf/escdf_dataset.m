@@ -343,59 +343,75 @@ classdef escdf_dataset < handle & dynamicprops
             obj.backing_state = 'memory';
         end
 
-        function write_to_disk(obj,hdf5_group_id)
-        % Write the dataset to an HDF5 group.
+        function realize_to_hdf5(obj,hdf5_group_id,strategy,overwrite)
+        % Realize the dataset into an HDF5 group.
         %
         % Parameters
         % ----------
         % hdf5_group_id : numeric
-        %     HDF5 group identifier representing the dataset group.
-        %
-        % Raises
-        % ------
-        % error
-        %     Raised if the dataset fails validation and therefore cannot
-        %     be written.
-        %
-        % Notes
-        % -----
-        % Dataset properties are written as datasets within the target
-        % group. The group also receives specification metadata attributes
-        % such as _specification_name, _descriptive_name, and _version.
-            isvalid = obj.validate();
-            if ~isvalid
-                error(['Incomplete escdf_dataset ',obj.name,' (',obj.dataset_type,') cannot be written to a file.'])
+        %     HDF5 group identifier representing this dataset in the
+        %     target file.
+        % strategy : char, optional
+        %     Property realization strategy. The first-pass implementation
+        %     supports only 'memory'.
+        % overwrite : logical, optional
+        %     If true, allow existing target property datasets to be
+        %     overwritten. The first-pass default is false.
+            if nargin < 3
+                strategy = 'memory';
             end
-            property_names = properties(obj);
-            for i = 1:length(property_names)
-                property = obj.(property_names{i});
-                if isempty(property)
+            if nargin < 4
+                overwrite = false;
+            end
+
+            property_list = properties(obj);
+            for i = 1:length(property_list)
+                property_name = property_list{i};
+
+                if startsWith(property_name,'DO_NOT_USE_')
                     continue
                 end
-                if ~property.isinmemory()
-                    warning('Overwriting HDF5 datasets is currently not implemented, so on-disk datasets are currently read into memory then rewritten to disk.  This could have implications for large datasets that will not fit into memory.')
-                    property.read_into_memory()
+
+                property = obj.(property_name);
+                if isa(property,'escdf_property')
+                    property.realize_to_hdf5(hdf5_group_id, strategy, overwrite);
                 end
-                property.write_to_disk(hdf5_group_id);
             end
+
             attr_space_id = H5S.create('H5S_SCALAR');
             str_type_id = H5T.copy('H5T_C_S1');
             H5T.set_size(str_type_id, 'H5T_VARIABLE');
+
             attr_id = H5A.create(hdf5_group_id, '_specification_name', str_type_id, attr_space_id, 'H5P_DEFAULT');
-            H5A.write(attr_id,str_type_id,obj.dataset_type);
+            H5A.write(attr_id, str_type_id, obj.dataset_type);
+            H5A.close(attr_id);
+
             attr_id = H5A.create(hdf5_group_id, '_descriptive_name', str_type_id, attr_space_id, 'H5P_DEFAULT');
-            H5A.write(attr_id,str_type_id,obj.descriptive_name);
-            % Create the attribute
-            attr_type = H5T.copy('H5T_NATIVE_INT'); % Use H5T_NATIVE_INT if you want integers
+            H5A.write(attr_id, str_type_id, obj.descriptive_name);
+            H5A.close(attr_id);
+
+            attr_type = H5T.copy('H5T_NATIVE_INT');
             attr_space = H5S.create_simple(1, numel(obj.version), []);
             attr_id = H5A.create(hdf5_group_id, '_version', attr_type, attr_space, 'H5P_DEFAULT', 'H5P_DEFAULT');
-            % Write the attribute data
             H5A.write(attr_id, attr_type, int32(obj.version));
             H5A.close(attr_id);
+            H5T.close(attr_type);
+            H5S.close(attr_space);
+
             H5T.close(str_type_id);
             H5S.close(attr_space_id);
+
             obj.backing_state = 'hdf5_native';
             obj.has_pending_changes = false;
+        end
+
+        function write_to_disk(obj,hdf5_group_id)
+        % Write the dataset to an HDF5 group.
+        %
+        % Notes
+        % -----
+        % Compatibility wrapper around realize_to_hdf5.
+            obj.realize_to_hdf5(hdf5_group_id,'memory',false);
         end
 
         function help(obj)

@@ -437,36 +437,72 @@ class ESCDFActivity:
     def __repr__(self):
         return self.repr()
 
-    def write_to_disk(self, h5_activities_group: h5.Group):
+    def realize_to_hdf5(self, activity_groups, strategy="memory", overwrite=False):
+        """
+        Realize the activity into an HDF5 activities group.
+
+        Parameters
+        ----------
+        activity_groups : h5py.Group
+            HDF5 group containing all activities.
+        strategy : {'memory'}, optional
+            Dataset/property realization strategy. The first-pass
+            implementation supports only ``"memory"``.
+        overwrite : bool, optional
+            If ``True``, allow replacing an existing activity group with
+            the same name.
+
+        Notes
+        -----
+        This method treats the current logical activity object as
+        authoritative. Contained datasets and metadata links are realized
+        into the target activity group.
+        """
+        if self.name in activity_groups:
+            if not overwrite:
+                raise ValueError(
+                    f'Target activities group already contains activity "{self.name}". '
+                    "Use overwrite=True to replace it explicitly."
+                )
+            del activity_groups[self.name]
+
+        activity_group = activity_groups.create_group(self.name)
+        activity_group.attrs["activity_name"] = self.descriptive_name
+        activity_group.attrs["activity_date"] = _datetime_to_iso_utc(self.activity_date)
+
+        parameters = activity_group.create_dataset(
+            "parameters",
+            (len(self.metadata_links),),
+            h5.string_dtype(encoding="utf-8"),
+        )
+        parameters.attrs["data_type"] = "str"
+        parameters[...] = self.metadata_links
+
+        for dataset in self.data:
+            data_group = activity_group.create_group(dataset.name)
+            dataset.realize_to_hdf5(
+                data_group,
+                strategy=strategy,
+                overwrite=overwrite,
+            )
+
+        self._backing_state = "hdf5_native"
+        self._has_pending_changes = False
+
+    def write_to_disk(self, activity_groups):
         """
         Write the activity to an HDF5 activities group.
 
         Parameters
         ----------
-        h5_activities_group : h5py.Group
-            Parent HDF5 group that stores all activities for an ESCDF file.
+        activity_groups : h5py.Group
+            HDF5 group containing all activities.
 
         Notes
         -----
-        The activity is written as a subgroup named after the activity's
-        short name. Linked metadata names are stored in the ``parameters``
-        dataset.
+        Compatibility wrapper around :meth:`realize_to_hdf5`.
         """
-        activity_group = h5_activities_group.create_group(self.name)
-        activity_group.attrs["activity_name"] = self.descriptive_name
-        activity_group.attrs["activity_date"] = _datetime_to_iso_utc(self.activity_date)
-        parameters_dataset = activity_group.create_dataset(
-            "parameters", (len(self.metadata_links),), dtype=h5.string_dtype()
-        )
-        parameters_dataset[...] = self.metadata_links
-        parameters_dataset.attrs["data_type"] = "str"
-        # Now go through and write each dataset to the group
-        for dataset in self.data:
-            data_group = activity_group.create_group(dataset.name)
-            dataset.write_to_disk(data_group)
-
-        self._backing_state = "hdf5_native"
-        self._has_pending_changes = False
+        self.realize_to_hdf5(activity_groups, strategy="memory", overwrite=False)
 
 
 class ESCDFActivityArray:

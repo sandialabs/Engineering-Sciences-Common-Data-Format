@@ -824,49 +824,58 @@ class ESCDFDataset:
         self._has_pending_changes = False
         return self
 
-    def write_to_disk(self, h5_group: h5.Group):
+    def realize_to_hdf5(self, h5_group, strategy="memory", overwrite=False):
         """
-        Write the dataset to an HDF5 group.
+        Realize the dataset into an HDF5 group.
 
         Parameters
         ----------
         h5_group : h5py.Group
-            Target HDF5 group representing this dataset.
-
-        Raises
-        ------
-        ValueError
-            If the dataset fails validation and therefore cannot be written.
+            HDF5 group representing this dataset in the target file.
+        strategy : {'memory'}, optional
+            Property realization strategy. The first-pass implementation
+            supports only ``"memory"``.
+        overwrite : bool, optional
+            If ``True``, allow existing target property datasets to be
+            overwritten. The first-pass default is ``False``.
 
         Notes
         -----
-        Dataset properties are written as datasets within ``h5_group``.
-        The group also receives specification metadata attributes such as
-        ``_specification_name``, ``_descriptive_name``, and ``_version``.
+        This method treats the current logical dataset object as
+        authoritative. Present properties are realized into ``h5_group``;
+        absent properties are omitted.
         """
-        isvalid = self.validate()
-        if not isvalid:
-            raise ValueError(
-                "Incomplete ESCDF Dataset {:} ({:}) cannot be written to a file.".format(
-                    self.name, self.dataset_type
-                )
-            )
         for name in self._valid_properties:
             property_ = getattr(self, name)
             if property_ is None:
                 continue
-            if not property_.in_memory:
-                warnings.warn(
-                    "Overwriting HDF5 datasets is not currently implemented, so on-disk datasets are currently read into memory then rewritten to disk.  This could have implications for large datasets that will not fit into memory."
-                )
-                property_.read_into_memory()
-            property_.write_to_disk(h5_group)
+            property_.realize_to_hdf5(
+                h5_group,
+                strategy=strategy,
+                overwrite=overwrite,
+            )
+
         h5_group.attrs["_specification_name"] = self.dataset_type
         h5_group.attrs["_descriptive_name"] = self.descriptive_name
         h5_group.attrs["_version"] = self._version
 
         self._backing_state = "hdf5_native"
         self._has_pending_changes = False
+
+    def write_to_disk(self, h5_group):
+        """
+        Write the dataset to an HDF5 group.
+
+        Parameters
+        ----------
+        h5_group : h5py.Group
+            HDF5 group representing this dataset in the target file.
+
+        Notes
+        -----
+        Compatibility wrapper around :meth:`realize_to_hdf5`.
+        """
+        self.realize_to_hdf5(h5_group, strategy="memory", overwrite=False)
 
     def read_into_memory(self):
         """

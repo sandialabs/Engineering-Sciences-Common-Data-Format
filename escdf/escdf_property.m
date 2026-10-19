@@ -306,64 +306,171 @@ classdef escdf_property < handle
         function id = get_h5d_id(obj)
             id = obj.h5d_id;
         end
+        function location = get_hdf5_location(obj)
+        % Return the current HDF5 backing location.
+        %
+        % Returns
+        % -------
+        % location : struct or empty
+        %     Struct with fields file_name and object_path, or empty if
+        %     the property is memory-backed.
+            if obj.inmemory
+                location = [];
+                return
+            end
 
-        function obj = write_to_disk(obj,h5g_id)
-        % Write the property to an HDF5 group.
+            file_id = H5I.get_file_id(obj.h5d_id);
+            file_name = H5F.get_name(file_id);
+            H5F.close(file_id);
+
+            location.file_name = char(java.io.File(file_name).getCanonicalPath());
+            location.object_path = H5I.get_name(obj.h5d_id);
+        end
+
+        function location = get_target_hdf5_location(obj, h5g_id)
+        % Return the HDF5 location this property would occupy in a target group.
         %
         % Parameters
         % ----------
         % h5g_id : numeric
-        %     Target HDF5 group identifier in which the property dataset
-        %     should be created.
+        %     Target HDF5 group identifier.
         %
-        % Notes
-        % -----
-        % If the property is already on disk, the method issues a warning
-        % and does not rewrite the data.
-            if strcmp(obj.backing_state, 'hdf5_native') && ~obj.inmemory
-                warning(['This property ',obj.name,' is already on disk and does not need to be written to disk again.'])
+        % Returns
+        % -------
+        % location : struct
+        %     Struct with fields file_name and object_path.
+            file_id = H5I.get_file_id(h5g_id);
+            file_name = H5F.get_name(file_id);
+            H5F.close(file_id);
+
+            group_path = H5I.get_name(h5g_id);
+            if strcmp(group_path, '/')
+                object_path = ['/', obj.name];
+            else
+                object_path = [group_path, '/', obj.name];
+            end
+
+            location.file_name = char(java.io.File(file_name).getCanonicalPath());
+            location.object_path = object_path;
+        end
+
+        function tf = is_realized_at(obj, h5g_id)
+        % Return whether this property is already realized at the target group.
+        %
+        % Parameters
+        % ----------
+        % h5g_id : numeric
+        %     Target HDF5 group identifier.
+        %
+        % Returns
+        % -------
+        % tf : logical
+        %     True if this property is HDF5-backed at exactly the target
+        %     dataset location.
+            current = obj.get_hdf5_location();
+            if isempty(current)
+                tf = false;
                 return
             end
 
-            if strcmp(obj.backing_state, 'hdf5_external')
+            target = obj.get_target_hdf5_location(h5g_id);
+            tf = strcmp(current.file_name, target.file_name) && ...
+                 strcmp(current.object_path, target.object_path);
+        end
+
+        function obj = realize_to_hdf5(obj, h5g_id, strategy, overwrite)
+        % Realize the property into an HDF5 group.
+        %
+        % Parameters
+        % ----------
+        % h5g_id : numeric
+        %     Target HDF5 group identifier.
+        % strategy : char, optional
+        %     First-pass implementation supports only 'memory'.
+        % overwrite : logical, optional
+        %     If true, allow replacing an existing target dataset.
+            if nargin < 3
+                strategy = 'memory';
+            end
+            if nargin < 4
+                overwrite = false;
+            end
+
+            if ~strcmp(strategy, 'memory')
+                error('Realization strategy "%s" is not implemented.', strategy)
+            end
+
+            if obj.is_realized_at(h5g_id)
+                return
+            end
+
+            if H5L.exists(h5g_id, obj.name, 'H5P_DEFAULT')
+                if ~overwrite
+                    error('Target HDF5 group already contains dataset "%s". Use overwrite=true to replace it explicitly.', obj.name)
+                end
+                H5L.delete(h5g_id, obj.name, 'H5P_DEFAULT');
+            end
+
+            if ~obj.inmemory
+                % TODO: Replace this eager materialization with direct HDF5
+                % copy or streamed copy for large datasets.
                 obj.read_into_memory();
             end
 
-             if obj.inmemory
+            if obj.inmemory
                 if isempty(obj.size)
                     space_id = H5S.create('H5S_SCALAR');
                 else
-                    space_id = H5S.create_simple(length(obj.size),obj.size,obj.size);
+                    space_id = H5S.create_simple(length(obj.size), obj.size, obj.size);
                 end
-                obj.h5d_id = H5D.create(h5g_id,obj.name,obj.h5type_id, space_id, 'H5P_DEFAULT');
+
+                obj.h5d_id = H5D.create(h5g_id, obj.name, obj.h5type_id, space_id, 'H5P_DEFAULT');
                 H5S.close(space_id);
-                data = permute(obj.data,ndims(obj.data):-1:1);
-                if strcmpi(obj.format,'c8')
-                    data = struct('r',single(real(data)),'i',single(imag(data)));
-                elseif strcmpi(obj.format,'c16')
-                    data = struct('r',double(real(data)),'i',double(imag(data)));
+
+                data = obj.data;
+
+                % MATLAB and HDF5 dimension orders differ.
+                if ~isempty(obj.size)
+                    data = permute(data, ndims(data):-1:1);
                 end
-                H5D.write(obj.h5d_id,obj.h5type_id,'H5S_ALL','H5S_ALL','H5P_DEFAULT',data);
+
+                if strcmpi(obj.format, 'c8')
+                    data = struct('r', single(real(data)), 'i', single(imag(data)));
+                elseif strcmpi(obj.format, 'c16')
+                    data = struct('r', double(real(data)), 'i', double(imag(data)));
+                end
+
+                H5D.write(obj.h5d_id, obj.h5type_id, 'H5S_ALL', 'H5S_ALL', 'H5P_DEFAULT', data);
+
                 obj.data = missing;
                 obj.inmemory = false;
+
                 attr_space_id = H5S.create('H5S_SCALAR');
                 str_type_id = H5T.copy('H5T_C_S1');
                 H5T.set_size(str_type_id, 'H5T_VARIABLE');
                 attr_id = H5A.create(obj.h5d_id, 'data_type', str_type_id, attr_space_id, 'H5P_DEFAULT');
-                H5A.write(attr_id,str_type_id,obj.format);
+                H5A.write(attr_id, str_type_id, obj.format);
                 H5A.close(attr_id);
                 H5T.close(str_type_id);
                 H5S.close(attr_space_id);
+
                 obj.backing_state = 'hdf5_native';
                 return
-
             end
-            
-            error('Property %s could not be realized to disk from backing_state %s.', ...
-                obj.name, obj.backing_state);
+
+            error('Property %s could not be realized to disk.', obj.name);
         end
 
-        function obj = read_into_memory(obj)
+        function write_to_disk(obj, h5g_id)
+        % Write the property to an HDF5 group.
+        %
+        % Notes
+        % -----
+        % Compatibility wrapper around realize_to_hdf5.
+            obj.realize_to_hdf5(h5g_id, 'memory', false);
+        end
+
+        function read_into_memory(obj)
         % Load the property fully into memory.
         %
         % Notes

@@ -866,6 +866,107 @@ class ESCDF:
         self.activities[activity_name].add_data(data)
         self._has_pending_changes = True
 
+    def realize_to_hdf5(self, h5_file, strategy="memory", overwrite=False):
+        """
+        Realize the current ESCDF logical graph into an HDF5 file.
+
+        Parameters
+        ----------
+        h5_file : h5py.File
+            Target HDF5 file handle.
+        strategy : {'memory'}, optional
+            Realization strategy passed to child objects. The first-pass
+            implementation supports only ``"memory"``.
+        overwrite : bool, optional
+            If ``True``, allow existing target groups to be deleted and
+            replaced. The default is ``False``.
+
+        Returns
+        -------
+        h5py.File
+            Target HDF5 file handle.
+
+        Raises
+        ------
+        ValueError
+            If any contained dataset is invalid, or if the target already
+            contains conflicting groups and ``overwrite`` is ``False``.
+
+        Notes
+        -----
+        This method treats the current in-memory ESCDF object graph as
+        authoritative. Removed objects are omitted. Renamed objects are
+        written under their current logical names. External-backed content
+        is realized by the lower-level dataset/property realization stack.
+        """
+        # Validate metadata
+        for metadata in self.metadata:
+            if not metadata.validate():
+                raise ValueError(
+                    "Cannot write to disk, metadata {:} is invalid.".format(
+                        metadata.name
+                    )
+                )
+
+        # Validate activity data
+        for activity in self.activities:
+            for data in activity.data:
+                if not data.validate():
+                    raise ValueError(
+                        "Cannot write to disk, data {:} from activity {:} is invalid.".format(
+                            data.name, activity.name
+                        )
+                    )
+
+        # File-level attributes
+        h5_file.attrs["created_by"] = self.created_by
+        h5_file.attrs["created_date"] = _datetime_to_iso_utc(self.created_date)
+
+        # Metadata groups
+        for metadata in self.metadata:
+            if metadata.name in h5_file:
+                if not overwrite:
+                    raise ValueError(
+                        f'Target HDF5 file already contains metadata group "{metadata.name}". '
+                        "Use overwrite=True to replace it explicitly."
+                    )
+                del h5_file[metadata.name]
+
+            group = h5_file.create_group(metadata.name)
+            metadata.realize_to_hdf5(
+                group,
+                strategy=strategy,
+                overwrite=overwrite,
+            )
+
+        # Activities group
+        if "activities" in h5_file:
+            if not overwrite:
+                raise ValueError(
+                    'Target HDF5 file already contains group "activities". '
+                    "Use overwrite=True to replace it explicitly."
+                )
+            del h5_file["activities"]
+
+        activity_group = h5_file.create_group("activities")
+
+        for activity in self.activities:
+            if hasattr(activity, "realize_to_hdf5"):
+                activity.realize_to_hdf5(
+                    activity_group,
+                    strategy=strategy,
+                    overwrite=overwrite,
+                )
+            else:
+                # Temporary compatibility until all activity classes expose
+                # realize_to_hdf5.
+                activity.write_to_disk(activity_group)
+
+        self._backing_state = "hdf5_native"
+        self._has_pending_changes = False
+        h5_file.flush()
+        return h5_file
+
     def write_to_disk(self, h5_file, clobber=False):
         """
         Write the container to an HDF5 file.
@@ -918,18 +1019,11 @@ class ESCDF:
                 h5_file = h5.File(h5_file, "w")
             else:
                 h5_file = h5.File(h5_file, "x")
-        h5_file.attrs["created_by"] = self.created_by
-        h5_file.attrs["created_date"] = _datetime_to_iso_utc(self.created_date)
-        for metadata in self.metadata:
-            group = h5_file.create_group(metadata.name)
-            metadata.write_to_disk(group)
-        activity_group = h5_file.create_group("activities")
-        for activity in self.activities:
-            activity.write_to_disk(activity_group)
-        self._backing_state = "hdf5_native"
-        self._has_pending_changes = False
-        h5_file.flush()
-        return h5_file
+        return self.realize_to_hdf5(
+            h5_file,
+            strategy="memory",
+            overwrite=False,
+        )
 
     @classmethod
     def load(cls, h5_file, readonly=True):

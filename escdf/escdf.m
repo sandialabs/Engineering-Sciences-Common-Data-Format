@@ -900,6 +900,115 @@ classdef escdf < handle
             obj.has_pending_changes = true;
         end
 
+        function file_id = realize_to_hdf5(obj,file_id,strategy,overwrite)
+        % Realize the current ESCDF logical graph into an HDF5 file.
+        %
+        % Parameters
+        % ----------
+        % file_id : numeric
+        %     Target HDF5 file identifier.
+        % strategy : char, optional
+        %     Realization strategy passed to child objects. The first-pass
+        %     implementation supports only 'memory'.
+        % overwrite : logical, optional
+        %     If true, allow existing target groups to be deleted and
+        %     replaced.
+        %
+        % Returns
+        % -------
+        % file_id : numeric
+        %     Target HDF5 file identifier.
+            if nargin < 3
+                strategy = 'memory';
+            end
+            if nargin < 4
+                overwrite = false;
+            end
+
+            % Validate metadata
+            for i = 1:length(obj.metadata)
+                md = obj.metadata(i);
+                if ~md.validate()
+                    error('Cannot write to disk, metadata %s is invalid.', md.get_name())
+                end
+            end
+
+            % Validate activity data
+            for i = 1:length(obj.activities)
+                activity = obj.activities(i);
+                for j = 1:length(activity.data)
+                    data = activity.data(j);
+                    if ~data.validate()
+                        error('Cannot write to disk, data %s from activity %s is invalid.', ...
+                            data.get_name(), activity.get_name())
+                    end
+                end
+            end
+
+            % Root attributes
+            attr_space_id = H5S.create('H5S_SCALAR');
+            str_type_id = H5T.copy('H5T_C_S1');
+            H5T.set_size(str_type_id, 'H5T_VARIABLE');
+
+            if escdf.h5_attribute_exists(file_id, 'created_by')
+                H5A.delete(file_id, 'created_by');
+            end
+            attr_id = H5A.create(file_id, 'created_by', str_type_id, attr_space_id, 'H5P_DEFAULT');
+            H5A.write(attr_id, str_type_id, obj.created_by);
+            H5A.close(attr_id);
+
+            if escdf.h5_attribute_exists(file_id, 'created_date')
+                H5A.delete(file_id, 'created_date');
+            end
+            attr_id = H5A.create(file_id, 'created_date', str_type_id, attr_space_id, 'H5P_DEFAULT');
+            H5A.write(attr_id, str_type_id, escdf.datetime_to_iso_utc(obj.created_date));
+            H5A.close(attr_id);
+
+            H5T.close(str_type_id);
+            H5S.close(attr_space_id);
+
+            % Metadata groups
+            for i = 1:length(obj.metadata)
+                md = obj.metadata(i);
+                md_name = md.get_name();
+
+                if H5L.exists(file_id, md_name, 'H5P_DEFAULT')
+                    if ~overwrite
+                        error('Target HDF5 file already contains metadata group "%s". Use overwrite=true to replace it explicitly.', md_name)
+                    end
+                    H5L.delete(file_id, md_name, 'H5P_DEFAULT');
+                end
+
+                gid = H5G.create(file_id, md_name, 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+                md.realize_to_hdf5(gid, strategy, overwrite);
+                H5G.close(gid);
+            end
+
+            % Activities group
+            if H5L.exists(file_id, 'activities', 'H5P_DEFAULT')
+                if ~overwrite
+                    error('Target HDF5 file already contains group "activities". Use overwrite=true to replace it explicitly.')
+                end
+                H5L.delete(file_id, 'activities', 'H5P_DEFAULT');
+            end
+
+            agid = H5G.create(file_id, 'activities', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+            for i = 1:length(obj.activities)
+                activity = obj.activities(i);
+                if ismethod(activity, 'realize_to_hdf5')
+                    activity.realize_to_hdf5(agid, strategy, overwrite);
+                else
+                    activity.write_to_disk(agid);
+                end
+            end
+
+            H5G.close(agid);
+
+            obj.backing_state = 'hdf5_native';
+            obj.has_pending_changes = false;
+        end
+
         function file_id = write_to_disk(obj,file_path,clobber)
         % Write the container to an HDF5 file.
         %
@@ -955,34 +1064,7 @@ classdef escdf < handle
             else
                 file_id = H5F.create(file_path,'H5F_ACC_EXCL','H5P_DEFAULT','H5P_DEFAULT');
             end
-            % Add user name and date
-            attr_space_id = H5S.create('H5S_SCALAR');
-            str_type_id = H5T.copy('H5T_C_S1');
-            H5T.set_size(str_type_id, 'H5T_VARIABLE');
-            attr_id = H5A.create(file_id, 'created_by', str_type_id, attr_space_id, 'H5P_DEFAULT');
-            H5A.write(attr_id,str_type_id, obj.created_by);
-            H5A.close(attr_id);
-            H5T.close(str_type_id);
-            H5S.close(attr_space_id);
-            attr_space_id = H5S.create('H5S_SCALAR');
-            str_type_id = H5T.copy('H5T_C_S1');
-            H5T.set_size(str_type_id, 'H5T_VARIABLE');
-            attr_id = H5A.create(file_id, 'created_date', str_type_id, attr_space_id, 'H5P_DEFAULT');
-            H5A.write(attr_id,str_type_id,escdf.datetime_to_iso_utc(obj.created_date));
-            H5A.close(attr_id);
-            H5T.close(str_type_id);
-            H5S.close(attr_space_id);
-            for i = 1:length(obj.metadata)
-                md = obj.metadata(i);
-                gid = H5G.create(file_id,md.get_name(), 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
-                md.write_to_disk(gid);
-                H5G.close(gid)
-            end
-            agid = H5G.create(file_id,'activities', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
-            obj.activities.write_to_disk(agid);
-            H5G.close(agid);
-            obj.backing_state = 'hdf5_native';
-            obj.has_pending_changes = false;
+            file_id = obj.realize_to_hdf5(file_id,'memory',false);
         end
 
         function varargout = subsref(obj, S)
@@ -1385,6 +1467,30 @@ classdef escdf < handle
             % Remove the specified index
             modified_array = array;
             modified_array(index_to_remove) = [];
+        end
+
+        function tf = h5_attribute_exists(loc_id, attr_name)
+        % Return whether an HDF5 attribute exists.
+        %
+        % Parameters
+        % ----------
+        % loc_id : numeric
+        %     HDF5 object identifier.
+        % attr_name : char
+        %     Attribute name.
+        %
+        % Returns
+        % -------
+        % tf : logical
+        %     True if the attribute exists.
+            tf = false;
+            try
+                attr_id = H5A.open(loc_id, attr_name);
+                H5A.close(attr_id);
+                tf = true;
+            catch
+                tf = false;
+            end
         end
 
         function name = escdf_get_or_prompt_attribution_name(interactive)

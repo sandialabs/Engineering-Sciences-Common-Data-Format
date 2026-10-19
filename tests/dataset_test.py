@@ -1,107 +1,123 @@
 import sys
-sys.path.insert(0, '..')
+
+sys.path.insert(0, "..")
 import pytest
 import os
 import h5py
+
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 import string
 import numpy as np
 import escdf
+
 rng = np.random.default_rng()
 FLOAT_SCALE = 10000
-CHARACTERS = string.ascii_letters+string.digits
+CHARACTERS = string.ascii_letters + string.digits
 MAX_RAGGED_LENGTH = 50
+
 
 @pytest.fixture
 def hdf5_and_properties(tmp_path):
-    file_path = tmp_path/'escdf_dataset_test.h5'
-    file = h5py.File(file_path,'w',libver='latest')
+    file_path = tmp_path / "escdf_dataset_test.h5"
+    file = h5py.File(file_path, "w", libver="latest")
     file.close()
-    test_specification_path = os.path.join(THIS_DIR,'..','escdf','specifications')
-    test_specification_file  = os.path.join(test_specification_path,'unittesting_specification.txt')
-    choice_specification_file = os.path.join(test_specification_path,'choicetesting_specification.txt')
-    enum_specification_file = os.path.join(test_specification_path,'enumtesting_specification.txt')
+    test_specification_path = os.path.join(THIS_DIR, "..", "escdf", "specifications")
+    test_specification_file = os.path.join(
+        test_specification_path, "unittesting_specification.txt"
+    )
+    choice_specification_file = os.path.join(
+        test_specification_path, "choicetesting_specification.txt"
+    )
+    enum_specification_file = os.path.join(
+        test_specification_path, "enumtesting_specification.txt"
+    )
     table_specification_file = os.path.join(
         test_specification_path, "tabletesting_specification.txt"
     )
     data_type = [
-        'u1','u2','u4','u8',
-        'i1','i2','i4','i8',
-        'f4','f8',
-        'c8','c16',
-        'str','bytes'
+        "u1",
+        "u2",
+        "u4",
+        "u8",
+        "i1",
+        "i2",
+        "i4",
+        "i8",
+        "f4",
+        "f8",
+        "c8",
+        "c16",
+        "str",
+        "bytes",
     ]
-    data_size = [
-        [],
-        [8],
-        [9,6],
-        [12,8,10]
-    ]
-    ragged = [
-        True, False
-    ]
+    data_size = [[], [8], [9, 6], [12, 8, 10]]
+    ragged = [True, False]
     property_names = []
     property_values = []
-    with open(test_specification_file,'w') as f:
-        f.write('unittesting_specification - v0.1.0\n-------------------------\nextends: activity_result\n\nproperties\n----------\n')
+    with open(test_specification_file, "w") as f:
+        f.write(
+            "unittesting_specification - v0.1.0\n-------------------------\nextends: activity_result\n\nproperties\n----------\n"
+        )
         for dt in data_type:
             for ds in data_size:
                 ndim = len(ds)
-                ds_name = ','.join([str(v) for v in ds])
+                ds_name = ",".join([str(v) for v in ds])
                 for rg in ragged:
-                    if rg and dt=='str':
+                    if rg and dt == "str":
                         continue
-                    elif rg and dt=='bytes':
+                    elif rg and dt == "bytes":
                         continue
-                    elif rg and dt=='c8':
+                    elif rg and dt == "c8":
                         continue
-                    elif rg and dt=='c16':
+                    elif rg and dt == "c16":
                         continue
-                    name = '{:}_ndim_{:}'.format(dt,ndim)
+                    name = "{:}_ndim_{:}".format(dt, ndim)
                     if rg:
-                        name = name + '_ragged'
-                    f.write('{:} - {:}'.format(name,dt))
+                        name = name + "_ragged"
+                    f.write("{:} - {:}".format(name, dt))
                     if len(ds_name) == 0:
                         if rg:
-                            f.write(' - scalar')
+                            f.write(" - scalar")
                     else:
-                        f.write(' - {:}'.format(ds_name))
+                        f.write(" - {:}".format(ds_name))
                     if rg:
-                        f.write(' - variable_length\n')
+                        f.write(" - variable_length\n")
                     else:
-                        f.write('\n')
+                        f.write("\n")
                     property_names.append(name)
-                    property_values.append((dt,ds,rg))
-    with open(choice_specification_file,'w') as f:
-        f.write('choicetesting_specification - v0.1.0\n--------------------------\nextends: activity_result\n\nproperties\n----------\n')
-        f.write('a - i8 - scalar - or:choicetest:ab_scalar\n')
-        f.write('b - i8 - scalar - or:choicetest:ab_scalar\n')
-        f.write('a - i8 - scalar - or:choicetest:ac_scalar\n')
-        f.write('c - i8 - scalar - or:choicetest:ac_scalar\n')
-        f.write('d - i8 - scalar - or:choicetest:d_scalar\n')
-        f.write('d - i8 - size_a - or:choicetest:d_array\n')
-        f.write('e - f8 - scalar - or:choicetest:e_real\n')
-        f.write('e - c16 - scalar - or:choicetest:e_complex\n')
-    with open(enum_specification_file,'w') as f:
-        f.write('enumtesting_specification - v0.1.0\n')
-        f.write('-------------------------\n')
-        f.write('extends: activity_result\n')
-        f.write('\n')
-        f.write('properties\n')
-        f.write('----------\n')
-        f.write('enum_scalar - str - scalar - enum:enum1\n')
-        f.write('enum_one_dim - str - num_vals - enum:enum2\n')
-        f.write('enum_two_dim - str - num_rows,num_cols - enum:enum2\n')
-        f.write('enum_three_dim - str - num_rows,num_cols,3 - enum:enum3\n')
-        f.write('enum_optional - str - scalar - optional,enum:enum1\n')
-        f.write('no_enum - str - scalar\n')
-        f.write('\n')
-        f.write('enumerations\n')
-        f.write('------------\n')
-        f.write('enum1 - red,orange,yellow,green,blue,violet\n')
-        f.write('enum2 - one, two, three, four,\n')
-        f.write('enum3 - do, re, mi, fa, sol, la, ti, do\n')
+                    property_values.append((dt, ds, rg))
+    with open(choice_specification_file, "w") as f:
+        f.write(
+            "choicetesting_specification - v0.1.0\n--------------------------\nextends: activity_result\n\nproperties\n----------\n"
+        )
+        f.write("a - i8 - scalar - or:choicetest:ab_scalar\n")
+        f.write("b - i8 - scalar - or:choicetest:ab_scalar\n")
+        f.write("a - i8 - scalar - or:choicetest:ac_scalar\n")
+        f.write("c - i8 - scalar - or:choicetest:ac_scalar\n")
+        f.write("d - i8 - scalar - or:choicetest:d_scalar\n")
+        f.write("d - i8 - size_a - or:choicetest:d_array\n")
+        f.write("e - f8 - scalar - or:choicetest:e_real\n")
+        f.write("e - c16 - scalar - or:choicetest:e_complex\n")
+    with open(enum_specification_file, "w") as f:
+        f.write("enumtesting_specification - v0.1.0\n")
+        f.write("-------------------------\n")
+        f.write("extends: activity_result\n")
+        f.write("\n")
+        f.write("properties\n")
+        f.write("----------\n")
+        f.write("enum_scalar - str - scalar - enum:enum1\n")
+        f.write("enum_one_dim - str - num_vals - enum:enum2\n")
+        f.write("enum_two_dim - str - num_rows,num_cols - enum:enum2\n")
+        f.write("enum_three_dim - str - num_rows,num_cols,3 - enum:enum3\n")
+        f.write("enum_optional - str - scalar - optional,enum:enum1\n")
+        f.write("no_enum - str - scalar\n")
+        f.write("\n")
+        f.write("enumerations\n")
+        f.write("------------\n")
+        f.write("enum1 - red,orange,yellow,green,blue,violet\n")
+        f.write("enum2 - one, two, three, four,\n")
+        f.write("enum3 - do, re, mi, fa, sol, la, ti, do\n")
     with open(table_specification_file, "w") as f:
         f.write("tabletesting_specification - v0.1.0\n")
         f.write("---------------------------\n")
@@ -114,14 +130,16 @@ def hdf5_and_properties(tmp_path):
         f.write("cube - f8 - num_layers,num_rows,num_cols\n")
         f.write("labels - str - num_rows\n")
     for key in list(sys.modules.keys()):
-        if key.startswith('escdf'):
+        if key.startswith("escdf"):
             del sys.modules[key]
     import escdf
-    yield file_path,property_names,property_values,escdf
+
+    yield file_path, property_names, property_values, escdf
     os.remove(test_specification_file)
     os.remove(choice_specification_file)
     os.remove(enum_specification_file)
     os.remove(table_specification_file)
+
 
 def testChoices(hdf5_and_properties):
     """
@@ -175,157 +193,210 @@ def testChoices_reports_ambiguous_choice_as_invalid(hdf5_and_properties):
 
 def testEnums(hdf5_and_properties):
     hdf5_file_path, property_names, property_values, escdf = hdf5_and_properties
-    test_dataset = escdf.Dataset('enum_dataset','enumtesting_specification')
-    test_dataset.enum_scalar = 'red'
-    test_dataset.enum_one_dim = ['one','three','three','one']
-    test_dataset.enum_two_dim = np.array([['one','three'],['two','four'],['one','one']],dtype=object)
-    test_dataset.enum_three_dim = np.tile(np.array([['do','re'],['mi','fa'],['sol','la']],dtype=object)[:,:,np.newaxis],[1,1,3])
-    test_dataset.no_enum = 'hello'
+    test_dataset = escdf.Dataset("enum_dataset", "enumtesting_specification")
+    test_dataset.enum_scalar = "red"
+    test_dataset.enum_one_dim = ["one", "three", "three", "one"]
+    test_dataset.enum_two_dim = np.array(
+        [["one", "three"], ["two", "four"], ["one", "one"]], dtype=object
+    )
+    test_dataset.enum_three_dim = np.tile(
+        np.array([["do", "re"], ["mi", "fa"], ["sol", "la"]], dtype=object)[
+            :, :, np.newaxis
+        ],
+        [1, 1, 3],
+    )
+    test_dataset.no_enum = "hello"
     assert test_dataset.validate()
-    test_dataset.enum_scalar = 're'
+    test_dataset.enum_scalar = "re"
     assert not test_dataset.validate()
-    test_dataset.enum_scalar = 'red'
-    test_dataset.enum_three_dim = np.tile(np.array([['do','ree'],['mi','fa'],['soo','la']],dtype=object)[:,:,np.newaxis],[1,1,3])
+    test_dataset.enum_scalar = "red"
+    test_dataset.enum_three_dim = np.tile(
+        np.array([["do", "ree"], ["mi", "fa"], ["soo", "la"]], dtype=object)[
+            :, :, np.newaxis
+        ],
+        [1, 1, 3],
+    )
     assert not test_dataset.validate()
+
 
 def testStorageAndRecall(hdf5_and_properties):
     hdf5_file_path, property_names, property_values, escdf = hdf5_and_properties
     # Create the dataset
-    dataset_name = 'test_dataset'
-    dataset_type = 'unittesting_specification'
-    dataset_descriptive_name = 'A dataset to test out the ability to read and write different formats.'
-    test_dataset = escdf.Dataset(dataset_name,dataset_type,dataset_descriptive_name)
+    dataset_name = "test_dataset"
+    dataset_type = "unittesting_specification"
+    dataset_descriptive_name = (
+        "A dataset to test out the ability to read and write different formats."
+    )
+    test_dataset = escdf.Dataset(dataset_name, dataset_type, dataset_descriptive_name)
     # Verify that the items are set correctly
     assert test_dataset.name == dataset_name
     assert test_dataset.descriptive_name == dataset_descriptive_name
     assert test_dataset.dataset_type == dataset_type
 
     stored_data = []
-    for prop_name, prop_data in zip(property_names,property_values):
+    for prop_name, prop_data in zip(property_names, property_values):
         data_type, data_shape, ragged = prop_data
         stride = 1
 
-        strides = tuple([slice(0,size,stride) for size in data_shape])
-        stride_sizes = [len(np.arange(sz)[sd]) for sz,sd in zip(data_shape,strides)]
+        strides = tuple([slice(0, size, stride) for size in data_shape])
+        stride_sizes = [len(np.arange(sz)[sd]) for sz, sd in zip(data_shape, strides)]
 
-        if 'u' in data_type or 'i' in data_type:
+        if "u" in data_type or "i" in data_type:
             if ragged:
-                data = np.ndarray(stride_sizes,dtype='object')
+                data = np.ndarray(stride_sizes, dtype="object")
                 for key in np.ndindex(*stride_sizes):
-                    data[key] = rng.integers(2**64-1,dtype='u8',size=np.random.randint(MAX_RAGGED_LENGTH)).astype(data_type)
+                    data[key] = rng.integers(
+                        2**64 - 1, dtype="u8", size=np.random.randint(MAX_RAGGED_LENGTH)
+                    ).astype(data_type)
             else:
-                data = rng.integers(2**64-1,dtype='u8',size=stride_sizes).astype(data_type)
-        elif 'f' in data_type:
+                data = rng.integers(2**64 - 1, dtype="u8", size=stride_sizes).astype(
+                    data_type
+                )
+        elif "f" in data_type:
             if ragged:
-                data = np.ndarray(stride_sizes,dtype='object')
+                data = np.ndarray(stride_sizes, dtype="object")
                 for key in np.ndindex(*stride_sizes):
-                    data[key] = (FLOAT_SCALE*rng.random(dtype='f8',size=np.random.randint(MAX_RAGGED_LENGTH))-FLOAT_SCALE/2).astype(data_type)
+                    data[key] = (
+                        FLOAT_SCALE
+                        * rng.random(
+                            dtype="f8", size=np.random.randint(MAX_RAGGED_LENGTH)
+                        )
+                        - FLOAT_SCALE / 2
+                    ).astype(data_type)
             else:
-                data = (FLOAT_SCALE*rng.random(dtype='f8',size=stride_sizes)-FLOAT_SCALE/2).astype(data_type)
-        elif 'c' in data_type:
+                data = (
+                    FLOAT_SCALE * rng.random(dtype="f8", size=stride_sizes)
+                    - FLOAT_SCALE / 2
+                ).astype(data_type)
+        elif "c" in data_type:
             if ragged:
-                data = np.ndarray(stride_sizes,dtype='object')
+                data = np.ndarray(stride_sizes, dtype="object")
                 for key in np.ndindex(*stride_sizes):
                     size = np.random.randint(MAX_RAGGED_LENGTH)
-                    data[key] = (FLOAT_SCALE*rng.random(dtype='f8',size=size)-FLOAT_SCALE/2+
-                                1j*(FLOAT_SCALE*rng.random(dtype='f8',size=size)-FLOAT_SCALE/2)).astype(data_type)
+                    data[key] = (
+                        FLOAT_SCALE * rng.random(dtype="f8", size=size)
+                        - FLOAT_SCALE / 2
+                        + 1j
+                        * (
+                            FLOAT_SCALE * rng.random(dtype="f8", size=size)
+                            - FLOAT_SCALE / 2
+                        )
+                    ).astype(data_type)
             else:
-                data = (FLOAT_SCALE*rng.random(dtype='f8',size=stride_sizes).astype(data_type)-FLOAT_SCALE/2 +
-                        1j*(FLOAT_SCALE*rng.random(dtype='f8',size=stride_sizes).astype(data_type)-FLOAT_SCALE/2)).astype(data_type)
-        elif data_type == 'str':
-            data = np.ndarray(stride_sizes,dtype='object')
+                data = (
+                    FLOAT_SCALE
+                    * rng.random(dtype="f8", size=stride_sizes).astype(data_type)
+                    - FLOAT_SCALE / 2
+                    + 1j
+                    * (
+                        FLOAT_SCALE
+                        * rng.random(dtype="f8", size=stride_sizes).astype(data_type)
+                        - FLOAT_SCALE / 2
+                    )
+                ).astype(data_type)
+        elif data_type == "str":
+            data = np.ndarray(stride_sizes, dtype="object")
             for key in np.ndindex(*stride_sizes):
-                data[key] = ''.join([CHARACTERS[i] for i in rng.integers(len(CHARACTERS),size=np.random.randint(MAX_RAGGED_LENGTH))])
-        elif data_type == 'bytes':
-            data = np.ndarray(stride_sizes,dtype='object')
+                data[key] = "".join(
+                    [
+                        CHARACTERS[i]
+                        for i in rng.integers(
+                            len(CHARACTERS), size=np.random.randint(MAX_RAGGED_LENGTH)
+                        )
+                    ]
+                )
+        elif data_type == "bytes":
+            data = np.ndarray(stride_sizes, dtype="object")
             for key in np.ndindex(*stride_sizes):
-                data[key] = rng.integers(2**64-1,dtype='u8',size=np.random.randint(MAX_RAGGED_LENGTH)).astype('u1')
+                data[key] = rng.integers(
+                    2**64 - 1, dtype="u8", size=np.random.randint(MAX_RAGGED_LENGTH)
+                ).astype("u1")
 
         stored_data.append(data)
-        setattr(test_dataset,prop_name,data)
+        setattr(test_dataset, prop_name, data)
 
     assert test_dataset.validate()
 
-     # Now read all data back to make sure we get what we specified
-    for prop_name,data in zip(property_names,stored_data):
-        prop = getattr(test_dataset,prop_name)
+    # Now read all data back to make sure we get what we specified
+    for prop_name, data in zip(property_names, stored_data):
+        prop = getattr(test_dataset, prop_name)
         data_shape = prop.shape
         if len(data_shape) == 0:
-            if data.dtype == 'object':
+            if data.dtype == "object":
                 actual = prop[...]
                 was_called = False
                 for key in np.ndindex(*data.shape):
                     was_called = True
-                    np.testing.assert_array_equal(actual[key],data[key])
+                    np.testing.assert_array_equal(actual[key], data[key])
                 assert was_called
             else:
-                np.testing.assert_array_equal(prop[...],data)
+                np.testing.assert_array_equal(prop[...], data)
         else:
-            if data.dtype == 'object':
+            if data.dtype == "object":
                 actual = prop[...]
                 was_called = False
                 for key in np.ndindex(*data.shape):
                     was_called = True
-                    np.testing.assert_array_equal(actual[key],data[key])
+                    np.testing.assert_array_equal(actual[key], data[key])
                 assert was_called
             else:
-                np.testing.assert_array_equal(prop[...].view(np.ndarray),data)
-    
-    hdf5_file = h5py.File(hdf5_file_path,'r+')
+                np.testing.assert_array_equal(prop[...].view(np.ndarray), data)
+
+    hdf5_file = h5py.File(hdf5_file_path, "r+")
     test_dataset.write_to_disk(hdf5_file)
 
-    for prop_name,data in zip(property_names,stored_data):
-        prop = getattr(test_dataset,prop_name)
+    for prop_name, data in zip(property_names, stored_data):
+        prop = getattr(test_dataset, prop_name)
         data_shape = prop.shape
         if len(data_shape) == 0:
-            if data.dtype == 'object':
+            if data.dtype == "object":
                 actual = prop[...]
                 was_called = False
                 for key in np.ndindex(*data.shape):
                     was_called = True
-                    if prop.datatype == 'str':
-                        np.testing.assert_array_equal(actual,data[key])
+                    if prop.datatype == "str":
+                        np.testing.assert_array_equal(actual, data[key])
                     else:
-                        np.testing.assert_array_equal(actual[key],data[key])
+                        np.testing.assert_array_equal(actual[key], data[key])
                 assert was_called
             else:
-                np.testing.assert_array_equal(prop[...],data)
+                np.testing.assert_array_equal(prop[...], data)
         else:
-            if data.dtype == 'object':
+            if data.dtype == "object":
                 actual = prop[...]
                 was_called = False
                 for key in np.ndindex(*data.shape):
                     was_called = True
-                    np.testing.assert_array_equal(actual[key],data[key])
+                    np.testing.assert_array_equal(actual[key], data[key])
                 assert was_called
             else:
-                np.testing.assert_array_equal(prop[...].view(np.ndarray),data)
+                np.testing.assert_array_equal(prop[...].view(np.ndarray), data)
 
     test_dataset.read_into_memory()
 
-    for prop_name,data in zip(property_names,stored_data):
-        prop = getattr(test_dataset,prop_name)
+    for prop_name, data in zip(property_names, stored_data):
+        prop = getattr(test_dataset, prop_name)
         data_shape = prop.shape
         if len(data_shape) == 0:
-            if data.dtype == 'object':
+            if data.dtype == "object":
                 actual = prop[...]
                 was_called = False
                 for key in np.ndindex(*data.shape):
                     was_called = True
-                    np.testing.assert_array_equal(actual[key],data[key])
+                    np.testing.assert_array_equal(actual[key], data[key])
                 assert was_called
             else:
-                np.testing.assert_array_equal(prop[...],data)
+                np.testing.assert_array_equal(prop[...], data)
         else:
-            if data.dtype == 'object':
+            if data.dtype == "object":
                 actual = prop[...]
                 was_called = False
                 for key in np.ndindex(*data.shape):
                     was_called = True
-                    np.testing.assert_array_equal(actual[key],data[key])
+                    np.testing.assert_array_equal(actual[key], data[key])
                 assert was_called
             else:
-                np.testing.assert_array_equal(prop[...].view(np.ndarray),data)
+                np.testing.assert_array_equal(prop[...].view(np.ndarray), data)
 
 
 def test_get_supertypes_returns_canonical_ancestry_order(hdf5_and_properties):
@@ -485,7 +556,9 @@ def test_dataset_assignment_sets_pending_changes(hdf5_and_properties):
     assert ds.backing_state == "memory"
 
 
-def test_loaded_dataset_starts_hdf5_native_with_no_pending_changes(tmp_path, monkeypatch):
+def test_loaded_dataset_starts_hdf5_native_with_no_pending_changes(
+    tmp_path, monkeypatch
+):
     """
     Verify that a dataset loaded from disk starts HDF5-native and has no
     pending changes.
@@ -515,7 +588,9 @@ def test_loaded_dataset_starts_hdf5_native_with_no_pending_changes(tmp_path, mon
     assert loaded_md.has_modified_properties is False
 
 
-def test_dataset_write_to_disk_sets_hdf5_native_and_clears_pending_changes(tmp_path, monkeypatch):
+def test_dataset_write_to_disk_sets_hdf5_native_and_clears_pending_changes(
+    tmp_path, monkeypatch
+):
     """
     Verify that writing a dataset to disk sets it HDF5-native and clears
     pending changes.
@@ -609,3 +684,30 @@ def test_attached_cloned_dataset_starts_memory_backed_and_not_pending_changes(
 
     assert attached_md.backing_state == "memory"
     assert attached_md.has_pending_changes is False
+
+
+def test_dataset_realize_to_hdf5_writes_properties_and_attributes(tmp_path):
+    file_path = tmp_path / "dataset_realize.h5"
+
+    ds = escdf.Dataset("meta1", "scalar", "Scalar metadata")
+    ds.value = 2.0
+    ds.unit = "g"
+    assert ds.validate()
+
+    with h5py.File(file_path, "w") as h5_file:
+        group = h5_file.create_group("meta1")
+        ds.realize_to_hdf5(group)
+
+        assert "value" in group
+        assert "unit" in group
+        assert group.attrs["_specification_name"] == "scalar"
+        assert group.attrs["_descriptive_name"] == "Scalar metadata"
+        np.testing.assert_allclose(group["value"][...], np.array(2.0))
+        assert (
+            group["unit"][()].decode() == "g"
+            if isinstance(group["unit"][()], bytes)
+            else group["unit"][()] == "g"
+        )
+
+    assert ds.backing_state == "hdf5_native"
+    assert ds.has_pending_changes is False

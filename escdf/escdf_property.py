@@ -9,6 +9,7 @@ for ragged numeric arrays and string arrays.
 
 import h5py as h5
 import numpy as np
+import os
 import warnings
 
 VERBOSE = False
@@ -234,6 +235,172 @@ class ESCDFProperty:
         else:
             self._data[key] = value
 
+    @staticmethod
+    def _normalize_hdf5_filename(filename):
+        """
+        Normalize an HDF5 filename for location comparisons.
+
+        Parameters
+        ----------
+        filename : str
+            HDF5 filename.
+
+        Returns
+        -------
+        str
+            Normalized absolute filename.
+        """
+        return os.path.abspath(filename)
+
+    @staticmethod
+    def _child_path(parent_path, child_name):
+        """
+        Construct an HDF5 child path.
+
+        Parameters
+        ----------
+        parent_path : str
+            Parent HDF5 path.
+        child_name : str
+            Child object name.
+
+        Returns
+        -------
+        str
+            Full HDF5 child path.
+        """
+        if parent_path == "/":
+            return f"/{child_name}"
+        return f"{parent_path.rstrip('/')}/{child_name}"
+
+    @property
+    def hdf5_location(self):
+        """
+        Return the current HDF5 backing location.
+
+        Returns
+        -------
+        tuple or None
+            ``(filename, object_path)`` if the property is HDF5-backed,
+            otherwise ``None``.
+        """
+        if self.in_memory:
+            return None
+        return (
+            self._normalize_hdf5_filename(self.h5_dataset.file.filename),
+            self.h5_dataset.name,
+        )
+
+    def target_hdf5_location(self, h5_group):
+        """
+        Return the HDF5 location this property would occupy in a target group.
+
+        Parameters
+        ----------
+        h5_group : h5py.Group
+            Target HDF5 group.
+
+        Returns
+        -------
+        tuple
+            ``(filename, object_path)`` for the target dataset location.
+        """
+        return (
+            self._normalize_hdf5_filename(h5_group.file.filename),
+            self._child_path(h5_group.name, self.name),
+        )
+
+    def is_realized_at(self, h5_group):
+        """
+        Return whether this property is already realized at the target group.
+
+        Parameters
+        ----------
+        h5_group : h5py.Group
+            Target HDF5 group.
+
+        Returns
+        -------
+        bool
+            ``True`` if this property is HDF5-backed at exactly the target
+            dataset location.
+        """
+        return self.hdf5_location == self.target_hdf5_location(h5_group)
+
+    def realize_to_hdf5(self, h5_group, strategy="memory", overwrite=False):
+        """
+        Realize the property into an HDF5 group.
+
+        Parameters
+        ----------
+        h5_group : h5py.Group
+            HDF5 group into which the property dataset should be realized.
+        strategy : {'memory'}, optional
+            Realization strategy. The first-pass implementation supports
+            only ``"memory"``, which materializes HDF5-backed data into
+            memory before writing when the current backing is not already
+            the target.
+        overwrite : bool, optional
+            If ``True``, allow an existing target dataset with the same
+            name to be deleted and replaced. The first-pass default is
+            ``False`` to avoid accidental overwrite.
+
+        Notes
+        -----
+        Realization is target-aware. HDF5-backed properties are skipped
+        only when their current backing location already matches the target
+        location.
+        """
+        if strategy != "memory":
+            raise NotImplementedError(
+                f'Realization strategy "{strategy}" is not implemented.'
+            )
+
+        if self.is_realized_at(h5_group):
+            return
+
+        if self.name in h5_group:
+            if not overwrite:
+                raise ValueError(
+                    f'Target HDF5 group already contains dataset "{self.name}". '
+                    "Use overwrite=True to replace it explicitly."
+                )
+            del h5_group[self.name]
+
+        if not self.in_memory:
+            # TODO: Replace this eager materialization with direct HDF5 copy
+            # or streamed copy for large datasets.
+            self.read_into_memory()
+
+        # Existing write-from-memory logic follows.
+        if self.in_memory:
+            if self.datatype == "str":
+                dtype = h5.special_dtype(vlen=str)
+            elif self.datatype == "bytes":
+                dtype = h5.special_dtype(vlen=np.dtype("uint8"))
+            elif self.ragged:
+                dtype = h5.vlen_dtype(self.datatype)
+            else:
+                dtype = self.datatype
+
+            self._h5_dataset = h5_group.create_dataset(self.name, self.shape, dtype)
+            self.h5_dataset.attrs["data_type"] = self.datatype
+
+            if VERBOSE:
+                print("Dataset Created on disk: {:}".format(self.name))
+
+            if self.ragged or self.datatype == "bytes" or self.datatype == "str":
+                for key in np.ndindex(self._h5_dataset.shape):
+                    self._h5_dataset[key] = self._data[key]
+            else:
+                self._h5_dataset[...] = self._data[...]
+
+            self._data = None
+            self._backing_state = "hdf5_native"
+            return
+
+        raise RuntimeError(f"Property {self.name} could not be realized to disk.")
+
     def write_to_disk(self, h5_group):
         """
         Write the property to an HDF5 group.
@@ -245,55 +412,9 @@ class ESCDFProperty:
 
         Notes
         -----
-        First-pass realization behavior:
-
-        - memory-backed properties are written from memory
-        - hdf5_native properties may be left as-is if already native to the
-          current context
-        - hdf5_external properties are materialized into the target group
-          rather than assumed to already belong there
+        This is a compatibility wrapper around ``realize_to_hdf5``.
         """
-        # If the property is already native HDF5-backed and belongs to the
-        # current native context, there is nothing to do in this first-pass
-        # model.
-        if self.backing_state == "hdf5_native" and not self.in_memory:
-            warnings.warn(
-                f"This property {self.name} is already on disk and does not need to be written to disk again."
-            )
-            return
-
-        # If the property is externally backed, first materialize it into
-        # native memory so that writing to the target produces a safe native
-        # copy rather than reusing the external source directly.
-        if self.backing_state == "hdf5_external":
-            self.read_into_memory()
-
-        # At this point, write from memory.
-        if self.in_memory:
-            if self.datatype == "str":
-                dtype = h5.special_dtype(vlen=str)
-            elif self.datatype == "bytes":
-                dtype = h5.special_dtype(vlen=np.dtype("uint8"))
-            elif self.ragged:
-                dtype = h5.vlen_dtype(self.datatype)
-            else:
-                dtype = self.datatype
-            self._h5_dataset = h5_group.create_dataset(self.name, self.shape, dtype)
-            self.h5_dataset.attrs["data_type"] = self.datatype
-            if VERBOSE:
-                print("Dataset Created on disk: {:}".format(self.name))
-            if self.ragged or self.datatype == "bytes" or self.datatype == "str":
-                for key in np.ndindex(self._h5_dataset.shape):
-                    self._h5_dataset[key] = self._data[key]
-            else:
-                self._h5_dataset[...] = self._data[...]
-            self._data = None
-            self._backing_state = "hdf5_native"
-            return
-
-        raise RuntimeError(
-            f"Property {self.name} could not be realized to disk from backing_state {self.backing_state}."
-        )
+        self.realize_to_hdf5(h5_group, strategy="memory")
 
     def read_into_memory(self):
         """

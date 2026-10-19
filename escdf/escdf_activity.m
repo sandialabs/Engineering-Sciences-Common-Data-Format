@@ -497,66 +497,96 @@ classdef escdf_activity < handle
                 out = [out,sprintf(['\n      Metadata Links:\n        ',strjoin(links,', ')])];
             end
         end
-        function write_to_disk(obj,hdf5_activities_group_id)
-            for i = 1:length(obj)
-                activity = obj(i);
 
-                % Create the group with the correct name
-                gid = H5G.create(hdf5_activities_group_id,activity.name, 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
-                attr_space_id = H5S.create('H5S_SCALAR');
-                str_type_id = H5T.copy('H5T_C_S1');
-                H5T.set_size(str_type_id, 'H5T_VARIABLE');
-                attr_id = H5A.create(gid, 'activity_name', str_type_id, attr_space_id, 'H5P_DEFAULT');
-                H5A.write(attr_id,str_type_id,activity.descriptive_name);
-                H5A.close(attr_id);
-                H5T.close(str_type_id);
-                H5S.close(attr_space_id);
-
-                attr_space_id = H5S.create('H5S_SCALAR');
-                str_type_id = H5T.copy('H5T_C_S1');
-                H5T.set_size(str_type_id, 'H5T_VARIABLE');
-                attr_id = H5A.create(gid, 'activity_date', str_type_id, attr_space_id, 'H5P_DEFAULT');
-                H5A.write(attr_id,str_type_id,escdf.datetime_to_iso_utc(activity.activity_date));
-                H5A.close(attr_id);
-                H5T.close(str_type_id);
-                H5S.close(attr_space_id);
-
-                % Create the parameters dataset
-                space_id = H5S.create_simple(1,length(activity.metadata_links),length(activity.metadata_links));
-                % Create the variable-length string datatype
-                str_type_id = H5T.copy('H5T_C_S1');
-                H5T.set_size(str_type_id, 'H5T_VARIABLE');
-                % Create the dataset with the variable-length string datatype
-                dataset_id = H5D.create(gid, 'parameters', str_type_id, space_id, 'H5P_DEFAULT');
-                % Write the 1D array of strings to the dataset
-                H5D.write(dataset_id, str_type_id, 'H5S_ALL', 'H5S_ALL', 'H5P_DEFAULT', activity.metadata_links);
-                % Close the variable-length string datatype
-                H5T.close(str_type_id);
-                % Close the dataspace
-                H5S.close(space_id);
-                attr_space_id = H5S.create('H5S_SCALAR');
-                str_type_id = H5T.copy('H5T_C_S1');
-                H5T.set_size(str_type_id, 'H5T_VARIABLE');
-                attr_id = H5A.create(dataset_id, 'data_type', str_type_id, attr_space_id, 'H5P_DEFAULT');
-                H5A.write(attr_id,str_type_id,'str');
-                H5A.close(attr_id);
-                H5T.close(str_type_id);
-                H5S.close(attr_space_id);
-                % Close the dataset
-                H5D.close(dataset_id);
-
-                % Now go through and write each dataset to the group.
-                for j = 1:length(activity.data)
-                    this_data = activity.data(j);
-                    this_gid = H5G.create(gid,this_data.get_name(),'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
-                    this_data.write_to_disk(this_gid);
-                    H5G.close(this_gid);
-                end
-                
-                activity.set_backing_state('hdf5_native');
-                activity.set_has_pending_changes(false);
-                H5G.close(gid)
+        function realize_to_hdf5(obj, activities_group_id, strategy, overwrite)
+        % Realize the activity into an HDF5 activities group.
+        %
+        % Parameters
+        % ----------
+        % activities_group_id : numeric
+        %     HDF5 group identifier containing all activities.
+        % strategy : char, optional
+        %     Dataset/property realization strategy. The first-pass
+        %     implementation supports only 'memory'.
+        % overwrite : logical, optional
+        %     If true, allow replacing an existing activity group with the
+        %     same name.
+            if nargin < 3
+                strategy = 'memory';
             end
+            if nargin < 4
+                overwrite = false;
+            end
+
+            if H5L.exists(activities_group_id, obj.name, 'H5P_DEFAULT')
+                if ~overwrite
+                    error('Target activities group already contains activity "%s". Use overwrite=true to replace it explicitly.', obj.name)
+                end
+                H5L.delete(activities_group_id, obj.name, 'H5P_DEFAULT');
+            end
+
+            gid = H5G.create(activities_group_id,obj.name,'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+            % Write activity attributes
+            attr_space_id = H5S.create('H5S_SCALAR');
+            str_type_id = H5T.copy('H5T_C_S1');
+            H5T.set_size(str_type_id, 'H5T_VARIABLE');
+
+            attr_id = H5A.create(gid, 'activity_name', str_type_id, attr_space_id, 'H5P_DEFAULT');
+            H5A.write(attr_id, str_type_id, obj.descriptive_name);
+            H5A.close(attr_id);
+
+            attr_id = H5A.create(gid, 'activity_date', str_type_id, attr_space_id, 'H5P_DEFAULT');
+            H5A.write(attr_id, str_type_id, char(escdf.datetime_to_iso_utc(obj.activity_date)));
+            H5A.close(attr_id);
+
+            H5T.close(str_type_id);
+            H5S.close(attr_space_id);
+
+            % Write metadata links
+            str_type_id = H5T.copy('H5T_C_S1');
+            H5T.set_size(str_type_id, 'H5T_VARIABLE');
+
+            if isempty(obj.metadata_links)
+                dataspace_id = H5S.create_simple(1, 0, 0);
+            else
+                dataspace_id = H5S.create_simple(1, length(obj.metadata_links), length(obj.metadata_links));
+            end
+
+            parameter_id = H5D.create(gid,'parameters',str_type_id,dataspace_id,'H5P_DEFAULT');
+            H5D.write(parameter_id,str_type_id,'H5S_ALL','H5S_ALL','H5P_DEFAULT',obj.metadata_links);
+
+            attr_space_id = H5S.create('H5S_SCALAR');
+            attr_id = H5A.create(parameter_id, 'data_type', str_type_id, attr_space_id, 'H5P_DEFAULT');
+            H5A.write(attr_id, str_type_id, 'str');
+            H5A.close(attr_id);
+            H5S.close(attr_space_id);
+
+            H5D.close(parameter_id);
+            H5S.close(dataspace_id);
+            H5T.close(str_type_id);
+
+            % Realize activity datasets
+            for j = 1:length(obj.data)
+                this_data = obj.data(j);
+                this_gid = H5G.create(gid,this_data.get_name(),'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+                this_data.realize_to_hdf5(this_gid, strategy, overwrite);
+                H5G.close(this_gid);
+            end
+
+            obj.backing_state = 'hdf5_native';
+            obj.has_pending_changes = false;
+
+            H5G.close(gid)
+        end
+
+        function write_to_disk(obj, activities_group_id)
+        % Write the activity to an HDF5 activities group.
+        %
+        % Notes
+        % -----
+        % Compatibility wrapper around realize_to_hdf5.
+            obj.realize_to_hdf5(activities_group_id,'memory',false);
         end
 
         function varargout = subsref(obj, S)

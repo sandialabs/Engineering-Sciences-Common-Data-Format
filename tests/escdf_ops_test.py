@@ -1035,3 +1035,92 @@ def test_replace_metadata_raises_if_missing(monkeypatch):
 
     with pytest.raises(ValueError, match="exists to replace"):
         f.replace_metadata(replacement)
+
+
+def test_activity_realize_to_hdf5_writes_datasets_and_links(tmp_path):
+    file_path = tmp_path / "activity_realize.h5"
+    h5_file = h5py.File(file_path, "w")
+    activities_group = h5_file.create_group("activities")
+
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    activity = escdf.Activity("act1", "Activity one", when)
+    activity.link_to_metadata("meta1")
+
+    data = make_minimal_data("data1")
+    data.value = 9.81
+    data.unit = "m/s^2"
+    assert data.validate()
+
+    activity.add_data(data)
+
+    activity.realize_to_hdf5(activities_group)
+
+    assert "act1" in activities_group
+    activity_group = activities_group["act1"]
+    assert activity_group.attrs["activity_name"] == "Activity one"
+    assert "parameters" in activity_group
+    assert "data1" in activity_group
+    assert "value" in activity_group["data1"]
+    assert "unit" in activity_group["data1"]
+
+    assert activity.backing_state == "hdf5_native"
+    assert activity.has_pending_changes is False
+
+    h5_file.close()
+
+
+def test_container_realize_to_hdf5_writes_metadata_and_activities(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "container_realize.h5"
+
+    f = escdf.ESCDF()
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+    data = make_minimal_data("data1")
+    f.add_data_to_activity("act1", data)
+    f.link_activity_to_metadata("act1", "meta1")
+
+    with h5py.File(file_path, "w") as h5_file:
+        f.realize_to_hdf5(h5_file)
+
+        assert h5_file.attrs["created_by"] == "unit_test_user"
+        assert "meta1" in h5_file
+        assert "activities" in h5_file
+        assert "act1" in h5_file["activities"]
+        assert "data1" in h5_file["activities"]["act1"]
+        assert "parameters" in h5_file["activities"]["act1"]
+
+    assert f.backing_state == "hdf5_native"
+    assert f.has_pending_changes is False
+
+
+def test_container_realize_to_hdf5_rejects_existing_group_without_overwrite(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "container_realize_conflict.h5"
+
+    f = escdf.ESCDF()
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+
+    with h5py.File(file_path, "w") as h5_file:
+        h5_file.create_group("meta1")
+
+        with pytest.raises(ValueError, match="already contains"):
+            f.realize_to_hdf5(h5_file)

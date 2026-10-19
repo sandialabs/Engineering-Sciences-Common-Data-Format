@@ -647,6 +647,29 @@ classdef dataset_test < matlab.unittest.TestCase
             testCase.verifyEqual(attached_md.get_backing_state(), 'memory');
             testCase.verifyFalse(attached_md.get_has_pending_changes());
         end
+
+        function test_dataset_realize_to_hdf5_writes_properties_and_attributes(testCase)
+            outfile = fullfile(testCase.temp_folder, 'dataset_realize.h5');
+            file_id = H5F.create(outfile, 'H5F_ACC_TRUNC', 'H5P_DEFAULT', 'H5P_DEFAULT');
+            group_id = H5G.create(file_id, 'meta1', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+            ds = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
+            ds.value = 2.0;
+            ds.unit = {'g'};
+            testCase.verifyTrue(ds.validate());
+
+            ds.realize_to_hdf5(group_id);
+
+            testCase.verifyEqual(ds.get_backing_state(), 'hdf5_native');
+            testCase.verifyFalse(ds.get_has_pending_changes());
+
+            testCase.verifyTrue(H5L.exists(group_id, 'value', 'H5P_DEFAULT'));
+            testCase.verifyTrue(H5L.exists(group_id, 'unit', 'H5P_DEFAULT'));
+
+            H5G.close(group_id);
+            H5F.close(file_id);
+        end
+
     end
 
 end

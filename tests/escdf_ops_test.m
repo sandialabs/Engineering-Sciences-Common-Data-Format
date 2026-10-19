@@ -914,5 +914,98 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             testCase.verifyTrue(did_error);
         end
 
+        function test_activity_realize_to_hdf5_writes_datasets_and_links(testCase)
+            outfile = fullfile(testCase.temp_folder, 'activity_realize.h5');
+            file_id = H5F.create(outfile, 'H5F_ACC_TRUNC', 'H5P_DEFAULT', 'H5P_DEFAULT');
+            activities_group = H5G.create(file_id, 'activities', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            activity = escdf_activity('act1', 'Activity one', when);
+            activity.link_to_metadata('meta1');
+
+            data = escdf_ops_test.make_minimal_data('data1');
+            data.value = 9.81;
+            data.unit = {'m/s^2'};
+            testCase.verifyTrue(data.validate());
+
+            activity.add_data(data);
+
+            activity.realize_to_hdf5(activities_group);
+
+            testCase.verifyTrue(H5L.exists(activities_group, 'act1', 'H5P_DEFAULT') ~= 0);
+
+            act_group = H5G.open(activities_group, 'act1');
+            testCase.verifyTrue(H5L.exists(act_group, 'parameters', 'H5P_DEFAULT') ~= 0);
+            testCase.verifyTrue(H5L.exists(act_group, 'data1', 'H5P_DEFAULT') ~= 0);
+
+            data_group = H5G.open(act_group, 'data1');
+            testCase.verifyTrue(H5L.exists(data_group, 'value', 'H5P_DEFAULT') ~= 0);
+            testCase.verifyTrue(H5L.exists(data_group, 'unit', 'H5P_DEFAULT') ~= 0);
+            H5G.close(data_group);
+
+            testCase.verifyEqual(activity.get_backing_state(), 'hdf5_native');
+            testCase.verifyFalse(activity.get_has_pending_changes());
+
+            H5G.close(act_group);
+            H5G.close(activities_group);
+            H5F.close(file_id);
+        end
+
+        function test_container_realize_to_hdf5_writes_metadata_and_activities(testCase)
+            outfile = fullfile(testCase.temp_folder, 'container_realize.h5');
+            file_id = H5F.create(outfile, 'H5F_ACC_TRUNC', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+            f = escdf();
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md);
+
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+            data = escdf_ops_test.make_minimal_data('data1');
+            f.add_data_to_activity('act1', data);
+            f.link_activity_to_metadata('act1', 'meta1');
+
+            f.realize_to_hdf5(file_id);
+
+            testCase.verifyTrue(H5L.exists(file_id, 'meta1', 'H5P_DEFAULT'));
+            testCase.verifyTrue(H5L.exists(file_id, 'activities', 'H5P_DEFAULT'));
+
+            agid = H5G.open(file_id, 'activities');
+            testCase.verifyTrue(H5L.exists(agid, 'act1', 'H5P_DEFAULT'));
+
+            act_gid = H5G.open(agid, 'act1');
+            testCase.verifyTrue(H5L.exists(act_gid, 'data1', 'H5P_DEFAULT'));
+            testCase.verifyTrue(H5L.exists(act_gid, 'parameters', 'H5P_DEFAULT'));
+
+            H5G.close(act_gid);
+            H5G.close(agid);
+            H5F.close(file_id);
+
+            testCase.verifyEqual(f.get_backing_state(), 'hdf5_native');
+            testCase.verifyFalse(f.get_has_pending_changes());
+        end
+
+        function test_container_realize_to_hdf5_rejects_existing_group_without_overwrite(testCase)
+            outfile = fullfile(testCase.temp_folder, 'container_realize_conflict.h5');
+            file_id = H5F.create(outfile, 'H5F_ACC_TRUNC', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+            f = escdf();
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md);
+
+            gid = H5G.create(file_id, 'meta1', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+            H5G.close(gid);
+
+            did_error = false;
+            try
+                f.realize_to_hdf5(file_id);
+            catch
+                did_error = true;
+            end
+
+            H5F.close(file_id);
+            testCase.verifyTrue(did_error);
+        end
+
     end
 end
