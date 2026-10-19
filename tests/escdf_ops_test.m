@@ -967,15 +967,15 @@ classdef escdf_ops_test < matlab.unittest.TestCase
 
             f.realize_to_hdf5(file_id);
 
-            testCase.verifyTrue(H5L.exists(file_id, 'meta1', 'H5P_DEFAULT'));
-            testCase.verifyTrue(H5L.exists(file_id, 'activities', 'H5P_DEFAULT'));
+            testCase.verifyTrue(H5L.exists(file_id, 'meta1', 'H5P_DEFAULT') ~= 0);
+            testCase.verifyTrue(H5L.exists(file_id, 'activities', 'H5P_DEFAULT') ~= 0);
 
             agid = H5G.open(file_id, 'activities');
-            testCase.verifyTrue(H5L.exists(agid, 'act1', 'H5P_DEFAULT'));
+            testCase.verifyTrue(H5L.exists(agid, 'act1', 'H5P_DEFAULT') ~= 0);
 
             act_gid = H5G.open(agid, 'act1');
-            testCase.verifyTrue(H5L.exists(act_gid, 'data1', 'H5P_DEFAULT'));
-            testCase.verifyTrue(H5L.exists(act_gid, 'parameters', 'H5P_DEFAULT'));
+            testCase.verifyTrue(H5L.exists(act_gid, 'data1', 'H5P_DEFAULT') ~= 0);
+            testCase.verifyTrue(H5L.exists(act_gid, 'parameters', 'H5P_DEFAULT') ~= 0);
 
             H5G.close(act_gid);
             H5G.close(agid);
@@ -1005,6 +1005,71 @@ classdef escdf_ops_test < matlab.unittest.TestCase
 
             H5F.close(file_id);
             testCase.verifyTrue(did_error);
+        end
+
+        function test_get_metadata_returns_same_object_reference(testCase)
+        % Verify repeated metadata retrieval returns the same stored object
+        % wrapper, not a newly wrapped copy.
+            f = escdf();
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md);
+
+            first = f.get_metadata('meta1');
+            second = f.get_metadata('meta1');
+            third = f.metadata(1);
+
+            testCase.verifySameHandle(first, second);
+            testCase.verifySameHandle(first, third);
+        end
+
+        function test_get_activity_returns_same_object_reference(testCase)
+        % Verify repeated activity retrieval returns the same stored object
+        % wrapper, not a newly wrapped copy.
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            first = f.get_activity('act1');
+            second = f.get_activity('act1');
+            third = f.activities(1);
+
+            testCase.verifySameHandle(first, second);
+            testCase.verifySameHandle(first, third);
+        end
+
+        function test_get_activity_data_returns_same_object_reference(testCase)
+        % Verify repeated activity-data retrieval returns the same stored
+        % dataset object wrapper, not a newly wrapped copy.
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            data = escdf_ops_test.make_minimal_data('data1');
+            f.add_data_to_activity('act1', data);
+
+            first = f.get_activity_data('act1', 'data1');
+            second = f.get_activity_data('act1', 'data1');
+            third = f.get_activity('act1').get_data('data1');
+
+            testCase.verifySameHandle(first, second);
+            testCase.verifySameHandle(first, third);
+        end
+
+        function test_activity_get_data_returns_same_object_reference(testCase)
+        % Verify activity-level repeated data retrieval returns the same
+        % stored dataset object wrapper.
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            activity = escdf_activity('act1', 'Activity one', when);
+
+            data = escdf_ops_test.make_minimal_data('data1');
+            activity.add_data(data);
+
+            first = activity.get_data('data1');
+            second = activity.get_data('data1');
+            third = activity.data(1);
+
+            testCase.verifySameHandle(first, second);
+            testCase.verifySameHandle(first, third);
         end
 
     end

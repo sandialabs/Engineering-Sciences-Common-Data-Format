@@ -1124,3 +1124,78 @@ def test_container_realize_to_hdf5_rejects_existing_group_without_overwrite(
 
         with pytest.raises(ValueError, match="already contains"):
             f.realize_to_hdf5(h5_file)
+
+
+def test_python_metadata_retrieval_returns_same_object_reference(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+
+    first = f.metadata["meta1"]
+    second = f.metadata["meta1"]
+    third = f.metadata[0]
+
+    assert first is second
+    assert first is third
+
+
+def test_python_activity_retrieval_returns_same_object_reference(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    first = f.activities["act1"]
+    second = f.activities["act1"]
+    third = f.activities[0]
+
+    assert first is second
+    assert first is third
+
+
+def test_python_activity_data_retrieval_returns_same_object_reference(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    data = make_minimal_data("data1")
+    f.add_data_to_activity("act1", data)
+
+    first = f.get_activity_data("act1", "data1")
+    second = f.get_activity_data("act1", "data1")
+    third = f.activities["act1"]["data1"]
+
+    assert first is second
+    assert first is third
+
+
+def test_python_activity_get_data_returns_same_object_reference():
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    activity = escdf.Activity("act1", "Activity one", when)
+
+    data = make_minimal_data("data1")
+    activity.add_data(data)
+
+    first = activity.get_data("data1")
+    second = activity.get_data("data1")
+    third = activity["data1"]
+
+    assert first is second
+    assert first is third
