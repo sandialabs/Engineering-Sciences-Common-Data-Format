@@ -1199,3 +1199,295 @@ def test_python_activity_get_data_returns_same_object_reference():
 
     assert first is second
     assert first is third
+
+
+def test_metadata_logical_parent_after_add_metadata(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    source_md = make_minimal_metadata("meta1")
+
+    assert source_md.logical_parent is None
+
+    f.add_metadata(source_md)
+    attached_md = f.metadata["meta1"]
+
+    assert attached_md is not source_md
+    assert attached_md.logical_parent is f
+
+    for prop_name in attached_md.property_names:
+        prop = getattr(attached_md, prop_name)
+        if prop is not None:
+            assert prop.logical_parent is attached_md
+
+
+def test_activity_logical_parent_after_add_activity(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+
+    f.add_activity("act1", "Activity one", when)
+    activity = f.activities["act1"]
+
+    assert activity.logical_parent is f
+
+
+def test_activity_data_logical_parent_after_add_data(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    data = make_minimal_data("data1")
+    assert data.logical_parent is None
+
+    f.add_data_to_activity("act1", data)
+    attached_data = f.activities["act1"]["data1"]
+
+    assert attached_data is not data
+    assert attached_data.logical_parent is f.activities["act1"]
+
+    for prop_name in attached_data.property_names:
+        prop = getattr(attached_data, prop_name)
+        if prop is not None:
+            assert prop.logical_parent is attached_data
+
+
+def test_removed_metadata_becomes_free(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+
+    removed = f.remove_metadata("meta1")
+
+    assert removed.logical_parent is None
+
+
+def test_removed_activity_becomes_free(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    removed = f.remove_activity("act1")
+
+    assert removed.logical_parent is None
+
+
+def test_removed_activity_data_becomes_free(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    data = make_minimal_data("data1")
+    f.add_data_to_activity("act1", data)
+
+    removed = f.remove_data_from_activity("act1", "data1")
+
+    assert removed.logical_parent is None
+
+
+def test_metadata_dataset_logical_path_after_add_metadata(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+
+    attached_md = f.metadata["meta1"]
+
+    assert attached_md.logical_parent is f
+    assert attached_md.logical_path == "/meta1"
+
+    assert attached_md.test_name.logical_parent is attached_md
+    assert attached_md.test_name.logical_path == "/meta1/test_name"
+
+
+def test_activity_and_activity_data_logical_paths(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    data = make_minimal_data("data1")
+    f.add_data_to_activity("act1", data)
+
+    activity = f.activities["act1"]
+    attached_data = activity["data1"]
+
+    assert activity.logical_parent is f
+    assert activity.logical_path == "/activities/act1"
+
+    assert attached_data.logical_parent is activity
+    assert attached_data.logical_path == "/activities/act1/data1"
+
+    assert attached_data.value.logical_parent is attached_data
+    assert attached_data.value.logical_path == "/activities/act1/data1/value"
+
+
+def test_removed_objects_have_no_logical_path(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+
+    removed = f.remove_metadata("meta1")
+
+    assert removed.logical_parent is None
+    assert removed.logical_path is None
+
+    # Child properties still point to the removed dataset wrapper, but the
+    # dataset wrapper itself is free, so child logical paths are also not
+    # container-realizable.
+    assert removed.test_name.logical_parent is removed
+    assert removed.test_name.logical_path is None
+
+
+def _assert_identity_chain(actual, expected):
+    assert len(actual) == len(expected)
+    for actual_item, expected_item in zip(actual, expected):
+        assert actual_item is expected_item
+
+
+def test_metadata_dataset_logical_ancestry_is_bottom_up(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+
+    attached_md = f.metadata["meta1"]
+
+    _assert_identity_chain(attached_md.logical_ancestry, [attached_md, f])
+    assert attached_md.logical_root is f
+
+    _assert_identity_chain(
+        attached_md.test_name.logical_ancestry,
+        [attached_md.test_name, attached_md, f],
+    )
+    assert attached_md.test_name.logical_root is f
+
+
+def test_activity_logical_ancestry_is_bottom_up(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    activity = f.activities["act1"]
+
+    _assert_identity_chain(activity.logical_ancestry, [activity, f])
+    assert activity.logical_root is f
+
+
+def test_activity_data_logical_ancestry_is_bottom_up(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+
+    data = make_minimal_data("data1")
+    f.add_data_to_activity("act1", data)
+
+    activity = f.activities["act1"]
+    attached_data = activity["data1"]
+
+    _assert_identity_chain(attached_data.logical_ancestry, [attached_data, activity, f])
+    assert attached_data.logical_root is f
+
+    _assert_identity_chain(
+        attached_data.value.logical_ancestry,
+        [attached_data.value, attached_data, activity, f],
+    )
+    assert attached_data.value.logical_root is f
+
+
+def test_free_dataset_logical_ancestry_stops_at_dataset():
+    ds = make_minimal_metadata("free_meta")
+
+    _assert_identity_chain(ds.logical_ancestry, [ds])
+    assert ds.logical_root is ds
+
+    _assert_identity_chain(ds.test_name.logical_ancestry, [ds.test_name, ds])
+    assert ds.test_name.logical_root is ds
+
+
+def test_removed_objects_logical_ancestry_stops_after_detach(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+
+    removed = f.remove_metadata("meta1")
+
+    _assert_identity_chain(removed.logical_ancestry, [removed])
+    assert removed.logical_root is removed
+
+    _assert_identity_chain(
+        removed.test_name.logical_ancestry, [removed.test_name, removed]
+    )
+    assert removed.test_name.logical_root is removed

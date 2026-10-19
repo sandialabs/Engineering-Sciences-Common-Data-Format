@@ -7,6 +7,7 @@ This module defines :class:`ESCDFActivity` and
 and links to metadata datasets.
 """
 
+import weakref
 from .escdf_dataset import ESCDFDataset, ESCDFDatasetArray
 from .escdf_property import ESCDFProperty
 from .escdf_timestamps import _datetime_from_iso_utc, _datetime_to_iso_utc
@@ -61,6 +62,8 @@ class ESCDFActivity:
         "_activity_date",
         "_backing_state",
         "_has_pending_changes",
+        "_logical_parent_ref",
+        "__weakref__",
     )
 
     @property
@@ -112,6 +115,77 @@ class ESCDFActivity:
     @property
     def has_pending_changes(self):
         return self._has_pending_changes
+
+    @property
+    def logical_parent(self):
+        """
+        Return the logical parent container for this activity.
+
+        Returns
+        -------
+        ESCDF or None
+            Parent ESCDF container if attached, otherwise ``None``.
+        """
+        if self._logical_parent_ref is None:
+            return None
+        return self._logical_parent_ref()
+
+    def set_logical_parent(self, parent):
+        """
+        Set the logical parent for this activity.
+
+        Parameters
+        ----------
+        parent : ESCDF or None
+            Parent container, or ``None`` for a free activity.
+        """
+        self._logical_parent_ref = None if parent is None else weakref.ref(parent)
+
+    @property
+    def logical_path(self):
+        """
+        Return the activity logical path in the current object graph.
+
+        Returns
+        -------
+        str or None
+            Logical path if attached to a container, otherwise ``None``.
+        """
+        parent = self.logical_parent
+        if parent is None:
+            return None
+        return f"/activities/{self.name}"
+
+    @property
+    def logical_ancestry(self):
+        """
+        Return the logical ancestry chain beginning with this activity.
+
+        Returns
+        -------
+        list
+            Bottom-up logical ancestry, beginning with this activity and
+            ending at the top-level container if attached.
+        """
+        ancestry = [self]
+        parent = self.logical_parent
+        while parent is not None:
+            ancestry.append(parent)
+            parent = getattr(parent, "logical_parent", None)
+        return ancestry
+
+    @property
+    def logical_root(self):
+        """
+        Return the root object of this activity's logical graph.
+
+        Returns
+        -------
+        object or None
+            Root object if attached, otherwise ``self``.
+        """
+        ancestry = self.logical_ancestry
+        return ancestry[-1] if ancestry else None
 
     def __init__(
         self,
@@ -176,6 +250,7 @@ class ESCDFActivity:
 
         self._backing_state = "memory"
         self._has_pending_changes = False
+        self._logical_parent_ref = None
 
     def link_to_metadata(self, metadata_name):
         """
@@ -257,6 +332,7 @@ class ESCDFActivity:
                     dataset.name
                 )
             )
+        dataset.set_logical_parent(self)
         self._data.add_dataset(dataset)
         self._has_pending_changes = True
 
@@ -295,6 +371,7 @@ class ESCDFActivity:
                 )
             )
         removed = self._data.remove_dataset(index)
+        removed.set_logical_parent(None)
         self._has_pending_changes = True
         return removed
 

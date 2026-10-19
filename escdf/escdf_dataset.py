@@ -10,6 +10,7 @@ the ESCDF specification files.
 import warnings
 import re
 import os
+import weakref
 
 import numpy as np
 import h5py as h5
@@ -244,6 +245,76 @@ class ESCDFDataset:
     def backing_state(self):
         return self._backing_state
 
+    @property
+    def logical_parent(self):
+        """
+        Return the logical parent for this dataset.
+
+        Returns
+        -------
+        ESCDF or ESCDFActivity or None
+            Parent container/activity if attached, otherwise ``None``.
+        """
+        if self._logical_parent_ref is None:
+            return None
+        return self._logical_parent_ref()
+
+    @property
+    def logical_path(self):
+        """
+        Return the dataset logical path in the current object graph.
+
+        Returns
+        -------
+        str or None
+            Logical path if attached to a container/activity, otherwise
+            ``None``.
+        """
+        parent = self.logical_parent
+        if parent is None:
+            return None
+
+        # Metadata dataset directly under ESCDF container.
+        if hasattr(parent, "metadata") and self.name in parent.metadata.names:
+            return f"/{self.name}"
+
+        # Activity data dataset.
+        if hasattr(parent, "name") and hasattr(parent, "data"):
+            return f"/activities/{parent.name}/{self.name}"
+
+        return None
+
+    @property
+    def logical_ancestry(self):
+        """
+        Return the logical ancestry chain beginning with this dataset.
+
+        Returns
+        -------
+        list
+            Bottom-up logical ancestry, beginning with this dataset and
+            ending at the top-level container if attached.
+        """
+        ancestry = [self]
+        parent = self.logical_parent
+        while parent is not None:
+            ancestry.append(parent)
+            parent = getattr(parent, "logical_parent", None)
+        return ancestry
+
+    @property
+    def logical_root(self):
+        """
+        Return the root object of this dataset's logical graph.
+
+        Returns
+        -------
+        object or None
+            Root object if attached, otherwise ``self``.
+        """
+        ancestry = self.logical_ancestry
+        return ancestry[-1] if ancestry else None
+
     @has_modified_properties.setter
     def has_modified_properties(self, val):
         if not isinstance(val, bool):
@@ -298,6 +369,7 @@ class ESCDFDataset:
         self._modified_properties = set()
         self._has_pending_changes = False
         self._backing_state = "memory"
+        self._logical_parent_ref = None
 
         resolved_specification = _get_resolved_specification(self.dataset_type)
 
@@ -328,6 +400,8 @@ class ESCDFDataset:
             "_modified_properties",
             "property_names",
             "_version",
+            "_logical_parent_ref",
+            "logical_parent",
         ]:
             super().__setattr__(name, value)
         elif name in self._valid_properties:
@@ -398,6 +472,9 @@ class ESCDFDataset:
                             name
                         )
                     )
+            if hasattr(this_property, "set_logical_parent"):
+                this_property.set_logical_parent(self)
+
             super().__setattr__(name, this_property)
             self._has_pending_changes = True
         else:
@@ -614,6 +691,17 @@ class ESCDFDataset:
     def set_version(self, major, minor, hotfix):
         self._version = (major, minor, hotfix)
         self._has_pending_changes = True
+
+    def set_logical_parent(self, parent):
+        """
+        Set the logical parent for this dataset.
+
+        Parameters
+        ----------
+        parent : ESCDF, ESCDFActivity, or None
+            Logical parent, or ``None`` for a free dataset.
+        """
+        self._logical_parent_ref = None if parent is None else weakref.ref(parent)
 
     def repr(self):
         property_list = sorted(self._valid_properties)
@@ -1282,7 +1370,7 @@ class ESCDFDatasetArray:
             try:
                 index = self.names.index(name_or_index)
             except ValueError:
-                raise ValueError(
+                raise AttributeError(
                     "No dataset with name {:} was found.".format(name_or_index)
                 )
             return self.datasets[index]

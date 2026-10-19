@@ -11,6 +11,7 @@ import h5py as h5
 import numpy as np
 import os
 import warnings
+import weakref
 
 VERBOSE = False
 
@@ -61,6 +62,7 @@ class ESCDFProperty:
         "_ragged",
         "_h5_dataset",
         "_backing_state",
+        "_logical_parent_ref",
     )
 
     @property
@@ -90,6 +92,69 @@ class ESCDFProperty:
     @property
     def backing_state(self):
         return self._backing_state
+
+    @property
+    def logical_parent(self):
+        """
+        Return the logical parent dataset for this property.
+
+        Returns
+        -------
+        ESCDFDataset or None
+            Logical parent dataset if attached, otherwise ``None``.
+        """
+        if self._logical_parent_ref is None:
+            return None
+        return self._logical_parent_ref()
+
+    @property
+    def logical_path(self):
+        """
+        Return the property logical path in the current object graph.
+
+        Returns
+        -------
+        str or None
+            Logical path if attached through a dataset, otherwise ``None``.
+        """
+        parent = self.logical_parent
+        if parent is None:
+            return None
+        parent_path = parent.logical_path
+        if parent_path is None:
+            return None
+        return f"{parent_path}/{self.name}"
+
+    @property
+    def logical_ancestry(self):
+        """
+        Return the logical ancestry chain beginning with this property.
+
+        Returns
+        -------
+        list
+            Bottom-up logical ancestry, beginning with this property and
+            ending at the top-level container if attached.
+        """
+        ancestry = [self]
+        parent = self.logical_parent
+        while parent is not None:
+            ancestry.append(parent)
+            parent = getattr(parent, "logical_parent", None)
+        return ancestry
+
+    @property
+    def logical_root(self):
+        """
+        Return the root object of this property's logical graph.
+
+        Returns
+        -------
+        object or None
+            Root object if attached, otherwise ``self``.
+        """
+        ancestry = self.logical_ancestry
+        return ancestry[-1] if ancestry else None
 
     def __init__(
         self,
@@ -131,6 +196,7 @@ class ESCDFProperty:
         self._shape = tuple(shape)
         self._ragged = ragged
         self._backing_state = "memory"
+        self._logical_parent_ref = None
 
         # Make sure we don't have inconsistent data
         if datatype == "str" and ragged:
@@ -400,6 +466,17 @@ class ESCDFProperty:
             return
 
         raise RuntimeError(f"Property {self.name} could not be realized to disk.")
+
+    def set_logical_parent(self, parent):
+        """
+        Set the logical parent for this property.
+
+        Parameters
+        ----------
+        parent : ESCDFDataset or None
+            Parent dataset, or ``None`` for a free property.
+        """
+        self._logical_parent_ref = None if parent is None else weakref.ref(parent)
 
     def write_to_disk(self, h5_group):
         """

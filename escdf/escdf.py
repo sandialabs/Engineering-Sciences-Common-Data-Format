@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import tempfile
+import weakref
 
 import datetime as dt
 from datetime import datetime, timezone
@@ -71,6 +72,7 @@ class ESCDF:
         "_mutability_state",
         "_backing_state",
         "_has_pending_changes",
+        "__weakref__",
     )
 
     @property
@@ -104,6 +106,43 @@ class ESCDF:
     @property
     def has_pending_changes(self):
         return self._has_pending_changes
+
+    @property
+    def logical_parent(self):
+        """
+        Return the logical parent of this container.
+
+        Returns
+        -------
+        None
+            Top-level ESCDF containers do not have a logical parent.
+        """
+        return None
+
+    @property
+    def logical_ancestry(self):
+        """
+        Return the logical ancestry chain beginning with this object.
+
+        Returns
+        -------
+        list
+            Bottom-up logical ancestry. For a top-level ESCDF container,
+            this is simply ``[self]``.
+        """
+        return [self]
+
+    @property
+    def logical_root(self):
+        """
+        Return the root object of this logical graph.
+
+        Returns
+        -------
+        ESCDF
+            This top-level container.
+        """
+        return self
 
     def __init__(self):
         """
@@ -202,6 +241,7 @@ class ESCDF:
         new_activity = ESCDFActivity(
             short_name, descriptive_name, activity_date, data, metadata_links
         )
+        new_activity.set_logical_parent(self)
         self.activities.add_activity(new_activity)
         self._has_pending_changes = True
 
@@ -230,6 +270,7 @@ class ESCDF:
         wrapper objects.
         """
         metadata_to_add = self._clone_dataset_for_attach(metadata)
+        metadata_to_add.set_logical_parent(self)
         self.metadata.add_dataset(metadata_to_add)
         if activity_to_link is not None:
             self.activities[activity_to_link].link_to_metadata(metadata_to_add.name)
@@ -420,6 +461,7 @@ class ESCDF:
         index = self.metadata.names.index(metadata_name)
         removed = self.metadata[index]
         self.metadata.remove_dataset(index)
+        removed.set_logical_parent(None)
         self._has_pending_changes = True
         return removed
 
@@ -555,6 +597,7 @@ class ESCDF:
         index = self.activities.names.index(activity_name)
         removed = self.activities[index]
         self.activities.remove_activity(index)
+        removed.set_logical_parent(None)
 
         if delete_unlinked_metadata:
             for metadata_name in linked_metadata_names:
@@ -841,6 +884,7 @@ class ESCDF:
         loaded dataset already belongs natively to the container being
         constructed.
         """
+        metadata.set_logical_parent(self)
         self.metadata.add_dataset(metadata)
         if activity_to_link is not None:
             self.activities[activity_to_link].link_to_metadata(metadata.name)
@@ -1078,7 +1122,6 @@ class ESCDF:
             if isinstance(h5_file[key], h5.Group) and not key == "activities"
         ]
         for name in metadata_names:
-            dataset = ESCDFDataset.load(h5_file, name)
             dataset = ESCDFDataset.load(h5_file, name)
             escdf_file._insert_metadata_native(dataset)
         activity_groups = h5_file["activities"]
