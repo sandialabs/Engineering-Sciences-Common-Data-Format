@@ -111,6 +111,36 @@ classdef escdf < handle
             obj.has_pending_changes = tf;
         end
 
+        function parent = get_logical_parent(obj)
+        % Return the logical parent of this container.
+        %
+        % Returns
+        % -------
+        % parent : []
+        %     Top-level ESCDF containers do not have logical parents.
+            parent = [];
+        end
+
+        function ancestry = get_logical_ancestry(obj)
+        % Return the logical ancestry chain beginning with this object.
+        %
+        % Returns
+        % -------
+        % ancestry : cell array
+        %     Bottom-up ancestry for a top-level container, which is {obj}.
+            ancestry = {obj};
+        end
+
+        function root = get_logical_root(obj)
+        % Return the root of this logical graph.
+        %
+        % Returns
+        % -------
+        % root : escdf
+        %     This container.
+            root = obj;
+        end
+
         function set_created_properties(obj, created_by, created_date)
         % Set file-level creation metadata.
         %
@@ -178,6 +208,7 @@ classdef escdf < handle
                 end
             end
             new_activity = escdf_activity(short_name,descriptive_name,activity_date,data,metadata_links);
+            new_activity.set_logical_parent(obj);
             obj.activities_array(end+1) = new_activity;
             obj.has_pending_changes = true;
         end
@@ -213,6 +244,7 @@ classdef escdf < handle
             end
 
             metadata_to_add = obj.clone_dataset_for_attach(metadata);
+            metadata_to_add.set_logical_parent(obj);
 
             if any(strcmp(obj.get_metadata_names(),metadata_to_add.get_name()))
                 error(['Metadata with name ',metadata_to_add.get_name(),' already exists.'])
@@ -376,6 +408,7 @@ classdef escdf < handle
 
             removed = obj.metadata(index);
             obj.metadata_array = escdf.remove_array_index(obj.metadata_array, index);
+            removed.set_logical_parent([]);
             obj.has_pending_changes = true;
         end
 
@@ -521,6 +554,7 @@ classdef escdf < handle
 
             removed = activity;
             obj.activities_array = escdf.remove_array_index(obj.activities_array, index);
+            removed.set_logical_parent([]);
 
             if delete_unlinked_metadata
                 for i = 1:length(linked_metadata)
@@ -872,6 +906,7 @@ classdef escdf < handle
             if any(strcmp(obj.get_metadata_names(),metadata.get_name()))
                 error(['Metadata with name ',metadata.get_name(),' already exists.'])
             end
+            metadata.set_logical_parent(obj);
             obj.metadata_array(end+1) = metadata;
             if ~isempty(activity_to_link)
                 index = obj.get_activity_index_from_name(activity_to_link);

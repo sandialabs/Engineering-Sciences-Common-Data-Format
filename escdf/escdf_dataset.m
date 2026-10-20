@@ -45,6 +45,7 @@ classdef escdf_dataset < handle & dynamicprops
         has_pending_changes;
         backing_state;
         version;
+        logical_parent;
     end
 
     methods
@@ -86,6 +87,7 @@ classdef escdf_dataset < handle & dynamicprops
             obj.name = name;
             obj.dataset_type = dataset_type;
             obj.descriptive_name = descriptive_name;
+            obj.logical_parent = [];
 
             registry = escdf_dataset.specification_cache_state('get');
             if isempty(registry)
@@ -230,6 +232,56 @@ classdef escdf_dataset < handle & dynamicprops
         % tf : logical
         %     Pending-changes state.
             obj.has_pending_changes = tf;
+        end
+
+        function parent = get_logical_parent(obj)
+        % Return the logical parent for this dataset.
+        %
+        % Returns
+        % -------
+        % parent : escdf or escdf_activity or []
+        %     Parent container/activity if attached, otherwise empty.
+            parent = obj.logical_parent;
+        end
+
+        function set_logical_parent(obj, parent)
+        % Set the logical parent for this dataset.
+        %
+        % Parameters
+        % ----------
+        % parent : escdf, escdf_activity, or []
+        %     Logical parent, or empty for a free dataset.
+            obj.logical_parent = parent;
+        end
+
+        function ancestry = get_logical_ancestry(obj)
+        % Return the logical ancestry chain beginning with this dataset.
+        %
+        % Returns
+        % -------
+        % ancestry : cell array
+        %     Bottom-up logical ancestry beginning with this dataset.
+            ancestry = {obj};
+            parent = obj.get_logical_parent();
+            while ~isempty(parent)
+                ancestry{end+1} = parent; %#ok<AGROW>
+                if ismethod(parent, 'get_logical_parent')
+                    parent = parent.get_logical_parent();
+                else
+                    parent = [];
+                end
+            end
+        end
+
+        function root = get_logical_root(obj)
+        % Return the root object of this dataset's logical graph.
+        %
+        % Returns
+        % -------
+        % root : object
+        %     Last object in the bottom-up logical ancestry chain.
+            ancestry = obj.get_logical_ancestry();
+            root = ancestry{end};
         end
 
         function out = validate(obj,hide_issues,report)
@@ -1146,6 +1198,11 @@ classdef escdf_dataset < handle & dynamicprops
                     error(['Assigned property is not consistent with the specification for ',name])
                 end
             end
+            
+            if isa(this_property, 'escdf_property')
+                this_property.set_logical_parent(obj);
+            end
+
             obj.(['DO_NOT_USE_',name]) = this_property;
             obj.has_pending_changes = true;
         end

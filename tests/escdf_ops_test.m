@@ -1072,5 +1072,302 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             testCase.verifySameHandle(first, third);
         end
 
+        function test_metadata_dataset_logical_ancestry_is_bottom_up(testCase)
+            f = escdf();
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md);
+
+            attached_md = f.get_metadata('meta1');
+
+            ancestry = attached_md.get_logical_ancestry();
+            testCase.verifyEqual(length(ancestry), 2);
+            testCase.verifySameHandle(ancestry{1}, attached_md);
+            testCase.verifySameHandle(ancestry{2}, f);
+            testCase.verifySameHandle(attached_md.get_logical_root(), f);
+
+            prop_ancestry = attached_md.test_name.get_logical_ancestry();
+            testCase.verifyEqual(length(prop_ancestry), 3);
+            testCase.verifySameHandle(prop_ancestry{1}, attached_md.test_name);
+            testCase.verifySameHandle(prop_ancestry{2}, attached_md);
+            testCase.verifySameHandle(prop_ancestry{3}, f);
+            testCase.verifySameHandle(attached_md.test_name.get_logical_root(), f);
+        end
+
+        function test_activity_logical_ancestry_is_bottom_up(testCase)
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            activity = f.get_activity('act1');
+
+            ancestry = activity.get_logical_ancestry();
+            testCase.verifyEqual(length(ancestry), 2);
+            testCase.verifySameHandle(ancestry{1}, activity);
+            testCase.verifySameHandle(ancestry{2}, f);
+            testCase.verifySameHandle(activity.get_logical_root(), f);
+        end
+
+        function test_activity_data_logical_ancestry_is_bottom_up(testCase)
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            data = escdf_ops_test.make_minimal_data('data1');
+            f.add_data_to_activity('act1', data);
+
+            activity = f.get_activity('act1');
+            attached_data = activity.get_data('data1');
+
+            ancestry = attached_data.get_logical_ancestry();
+            testCase.verifyEqual(length(ancestry), 3);
+            testCase.verifySameHandle(ancestry{1}, attached_data);
+            testCase.verifySameHandle(ancestry{2}, activity);
+            testCase.verifySameHandle(ancestry{3}, f);
+            testCase.verifySameHandle(attached_data.get_logical_root(), f);
+
+            prop_ancestry = attached_data.value.get_logical_ancestry();
+            testCase.verifyEqual(length(prop_ancestry), 4);
+            testCase.verifySameHandle(prop_ancestry{1}, attached_data.value);
+            testCase.verifySameHandle(prop_ancestry{2}, attached_data);
+            testCase.verifySameHandle(prop_ancestry{3}, activity);
+            testCase.verifySameHandle(prop_ancestry{4}, f);
+            testCase.verifySameHandle(attached_data.value.get_logical_root(), f);
+        end
+
+        function test_free_dataset_logical_ancestry_stops_at_dataset(testCase)
+            ds = escdf_ops_test.make_minimal_metadata('free_meta');
+
+            ancestry = ds.get_logical_ancestry();
+            testCase.verifyEqual(length(ancestry), 1);
+            testCase.verifySameHandle(ancestry{1}, ds);
+            testCase.verifySameHandle(ds.get_logical_root(), ds);
+
+            prop_ancestry = ds.test_name.get_logical_ancestry();
+            testCase.verifyEqual(length(prop_ancestry), 2);
+            testCase.verifySameHandle(prop_ancestry{1}, ds.test_name);
+            testCase.verifySameHandle(prop_ancestry{2}, ds);
+            testCase.verifySameHandle(ds.test_name.get_logical_root(), ds);
+        end
+
+        function test_removed_objects_logical_ancestry_stops_after_detach(testCase)
+            f = escdf();
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md);
+
+            removed = f.remove_metadata('meta1');
+
+            ancestry = removed.get_logical_ancestry();
+            testCase.verifyEqual(length(ancestry), 1);
+            testCase.verifySameHandle(ancestry{1}, removed);
+            testCase.verifySameHandle(removed.get_logical_root(), removed);
+
+            prop_ancestry = removed.test_name.get_logical_ancestry();
+            testCase.verifyEqual(length(prop_ancestry), 2);
+            testCase.verifySameHandle(prop_ancestry{1}, removed.test_name);
+            testCase.verifySameHandle(prop_ancestry{2}, removed);
+            testCase.verifySameHandle(removed.test_name.get_logical_root(), removed);
+        end
+
+        function test_container_logical_ancestry_is_self(testCase)
+        % Verify that a top-level ESCDF container has no logical parent and
+        % its ancestry/root are itself.
+            f = escdf();
+
+            testCase.verifyEmpty(f.get_logical_parent());
+
+            ancestry = f.get_logical_ancestry();
+            testCase.verifyEqual(length(ancestry), 1);
+            testCase.verifySameHandle(ancestry{1}, f);
+            testCase.verifySameHandle(f.get_logical_root(), f);
+        end
+
+        function test_metadata_dataset_logical_parent_after_add_metadata(testCase)
+        % Verify that metadata added to a container has the container as
+        % logical parent and that its properties have the dataset as logical
+        % parent.
+            f = escdf();
+            source_md = escdf_ops_test.make_minimal_metadata('meta1');
+
+            testCase.verifyEmpty(source_md.get_logical_parent());
+
+            f.add_metadata(source_md);
+            attached_md = f.get_metadata('meta1');
+
+            testCase.verifyFalse(attached_md == source_md);
+            testCase.verifySameHandle(attached_md.get_logical_parent(), f);
+
+            testCase.verifySameHandle(attached_md.test_name.get_logical_parent(), attached_md);
+            testCase.verifySameHandle(attached_md.program.get_logical_parent(), attached_md);
+            testCase.verifySameHandle(attached_md.hardware_list.get_logical_parent(), attached_md);
+            testCase.verifySameHandle(attached_md.point_of_contact.get_logical_parent(), attached_md);
+        end
+
+        function test_activity_logical_parent_after_add_activity(testCase)
+        % Verify that activities added to a container have the container as
+        % logical parent.
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+
+            f.add_activity('act1', 'Activity one', when);
+            activity = f.get_activity('act1');
+
+            testCase.verifySameHandle(activity.get_logical_parent(), f);
+        end
+
+        function test_activity_data_logical_parent_after_add_data(testCase)
+        % Verify that activity data added to an activity has the activity
+        % as logical parent and its properties have the dataset as logical
+        % parent.
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            data = escdf_ops_test.make_minimal_data('data1');
+            testCase.verifyEmpty(data.get_logical_parent());
+
+            f.add_data_to_activity('act1', data);
+
+            activity = f.get_activity('act1');
+            attached_data = activity.get_data('data1');
+
+            testCase.verifyFalse(attached_data == data);
+            testCase.verifySameHandle(attached_data.get_logical_parent(), activity);
+
+            testCase.verifySameHandle(attached_data.value.get_logical_parent(), attached_data);
+            testCase.verifySameHandle(attached_data.unit.get_logical_parent(), attached_data);
+        end
+
+        function test_removed_metadata_logical_ancestry_stops_after_detach(testCase)
+        % Verify that removed metadata is detached from the container but
+        % its properties still logically belong to the removed dataset.
+            f = escdf();
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md);
+
+            removed = f.remove_metadata('meta1');
+
+            testCase.verifyEmpty(removed.get_logical_parent());
+
+            ancestry = removed.get_logical_ancestry();
+            testCase.verifyEqual(length(ancestry), 1);
+            testCase.verifySameHandle(ancestry{1}, removed);
+            testCase.verifySameHandle(removed.get_logical_root(), removed);
+
+            prop_ancestry = removed.test_name.get_logical_ancestry();
+            testCase.verifyEqual(length(prop_ancestry), 2);
+            testCase.verifySameHandle(prop_ancestry{1}, removed.test_name);
+            testCase.verifySameHandle(prop_ancestry{2}, removed);
+            testCase.verifySameHandle(removed.test_name.get_logical_root(), removed);
+        end
+
+        function test_removed_activity_logical_ancestry_stops_after_detach(testCase)
+        % Verify that removed activities are detached from the container.
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            removed = f.remove_activity('act1');
+
+            testCase.verifyEmpty(removed.get_logical_parent());
+
+            ancestry = removed.get_logical_ancestry();
+            testCase.verifyEqual(length(ancestry), 1);
+            testCase.verifySameHandle(ancestry{1}, removed);
+            testCase.verifySameHandle(removed.get_logical_root(), removed);
+        end
+
+        function test_removed_activity_data_logical_ancestry_stops_after_detach(testCase)
+        % Verify that removed activity data is detached from the activity
+        % while its properties still logically belong to the removed
+        % dataset.
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            data = escdf_ops_test.make_minimal_data('data1');
+            f.add_data_to_activity('act1', data);
+
+            removed = f.remove_data_from_activity('act1', 'data1');
+
+            testCase.verifyEmpty(removed.get_logical_parent());
+
+            ancestry = removed.get_logical_ancestry();
+            testCase.verifyEqual(length(ancestry), 1);
+            testCase.verifySameHandle(ancestry{1}, removed);
+            testCase.verifySameHandle(removed.get_logical_root(), removed);
+
+            prop_ancestry = removed.value.get_logical_ancestry();
+            testCase.verifyEqual(length(prop_ancestry), 2);
+            testCase.verifySameHandle(prop_ancestry{1}, removed.value);
+            testCase.verifySameHandle(prop_ancestry{2}, removed);
+            testCase.verifySameHandle(removed.value.get_logical_root(), removed);
+        end
+
+        function test_metadata_logical_parent_after_add_metadata(testCase)
+        % Verify that metadata added to a container has the container as
+        % logical parent and that its properties have the metadata dataset
+        % as logical parent.
+            f = escdf();
+            source_md = escdf_ops_test.make_minimal_metadata('meta1');
+
+            testCase.verifyEmpty(source_md.get_logical_parent());
+
+            f.add_metadata(source_md);
+            attached_md = f.get_metadata('meta1');
+
+            % add_metadata clones the dataset wrapper before insertion.
+            testCase.verifyFalse(attached_md == source_md);
+            testCase.verifySameHandle(attached_md.get_logical_parent(), f);
+
+            property_names = properties(attached_md);
+            for i = 1:length(property_names)
+                property_name = property_names{i};
+                if startsWith(property_name, 'DO_NOT_USE_')
+                    continue
+                end
+
+                prop = attached_md.(property_name);
+                if isa(prop, 'escdf_property')
+                    testCase.verifySameHandle(prop.get_logical_parent(), attached_md);
+                end
+            end
+        end
+
+        function test_removed_metadata_becomes_free(testCase)
+        % Verify that removed metadata no longer has a logical parent.
+            f = escdf();
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md);
+
+            removed = f.remove_metadata('meta1');
+
+            testCase.verifyEmpty(removed.get_logical_parent());
+        end
+
+        function test_removed_activity_becomes_free(testCase)
+        % Verify that a removed activity no longer has a logical parent.
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            removed = f.remove_activity('act1');
+
+            testCase.verifyEmpty(removed.get_logical_parent());
+        end
+
+        function test_removed_activity_data_becomes_free(testCase)
+        % Verify that removed activity data no longer has a logical parent.
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            data = escdf_ops_test.make_minimal_data('data1');
+            f.add_data_to_activity('act1', data);
+
+            removed = f.remove_data_from_activity('act1', 'data1');
+
+            testCase.verifyEmpty(removed.get_logical_parent());
+        end
+
     end
 end

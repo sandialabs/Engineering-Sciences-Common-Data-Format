@@ -40,6 +40,7 @@ classdef escdf_activity < handle
         activity_date;
         backing_state;
         has_pending_changes;
+        logical_parent;
     end
 
     methods
@@ -94,6 +95,7 @@ classdef escdf_activity < handle
             end
             obj.name = short_name;
             obj.descriptive_name = descriptive_name;
+            obj.logical_parent = [];
             if isa(activity_date,'datetime')
                 obj.activity_date = activity_date;
             else
@@ -229,6 +231,56 @@ classdef escdf_activity < handle
             obj.has_pending_changes = tf;
         end
 
+        function parent = get_logical_parent(obj)
+        % Return the logical parent container for this activity.
+        %
+        % Returns
+        % -------
+        % parent : escdf or []
+        %     Parent ESCDF container if attached, otherwise empty.
+            parent = obj.logical_parent;
+        end
+
+        function set_logical_parent(obj, parent)
+        % Set the logical parent for this activity.
+        %
+        % Parameters
+        % ----------
+        % parent : escdf or []
+        %     Parent container, or empty for a free activity.
+            obj.logical_parent = parent;
+        end
+
+        function ancestry = get_logical_ancestry(obj)
+        % Return the logical ancestry chain beginning with this activity.
+        %
+        % Returns
+        % -------
+        % ancestry : cell array
+        %     Bottom-up logical ancestry beginning with this activity.
+            ancestry = {obj};
+            parent = obj.get_logical_parent();
+            while ~isempty(parent)
+                ancestry{end+1} = parent; %#ok<AGROW>
+                if ismethod(parent, 'get_logical_parent')
+                    parent = parent.get_logical_parent();
+                else
+                    parent = [];
+                end
+            end
+        end
+
+        function root = get_logical_root(obj)
+        % Return the root object of this activity's logical graph.
+        %
+        % Returns
+        % -------
+        % root : object
+        %     Last object in the bottom-up logical ancestry chain.
+            ancestry = obj.get_logical_ancestry();
+            root = ancestry{end};
+        end
+
         function add_data(obj,dataset)
         % Add a result dataset to the activity.
         %
@@ -252,6 +304,7 @@ classdef escdf_activity < handle
             if any(strcmp(obj.get_data_names(),dataset.get_name()))
                 error(['Data with name ',dataset.get_name(),' already exists in this activity.'])
             end
+            dataset.set_logical_parent(obj)
             obj.data = [obj.data,dataset];
             obj.has_pending_changes = true;
         end
@@ -293,6 +346,7 @@ classdef escdf_activity < handle
 
             removed = obj.data(index);
             obj.data = remove_array_index(obj.data, index);
+            removed.set_logical_parent([]);
             obj.has_pending_changes = true;
         end
 
