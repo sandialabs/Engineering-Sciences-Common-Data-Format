@@ -184,6 +184,12 @@ containing:
 - HDF5 object path
 - optionally an HDF5 object identifier or token
 
+Backing location descriptors are runtime/session-local in the first
+implementation. They are used to compare HDF5-backed objects within the
+current process and filesystem context. They are not intended to be stable
+cross-machine or long-term persistent identifiers. Future catalog or
+object-store workflows may add persistent file/object UUIDs.
+
 The exact implementation may evolve, but the conceptual role should
 remain stable.
 
