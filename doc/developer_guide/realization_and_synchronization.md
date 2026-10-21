@@ -190,6 +190,11 @@ current process and filesystem context. They are not intended to be stable
 cross-machine or long-term persistent identifiers. Future catalog or
 object-store workflows may add persistent file/object UUIDs.
 
+Backing locations are the source of truth for identity and realization
+decisions. HDF5 handles may be cached for efficient access but must not be
+used as the primary identity because handles can be invalidated, reopened,
+or duplicated.
+
 The exact implementation may evolve, but the conceptual role should
 remain stable.
 
@@ -732,6 +737,10 @@ realize_container_to_hdf5(container, target_file)
 └── for each activity in logical graph:
     └── realize_activity_to_hdf5(activity, activities_group)
 ```
+
+Default write operations should leave the target file in a closed,
+complete state when they return. Long-lived writable HDF5 handles should
+be exposed only through explicit advanced I/O/session APIs.
 
 ---
 
