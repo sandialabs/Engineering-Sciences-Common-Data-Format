@@ -1491,3 +1491,60 @@ def test_removed_objects_logical_ancestry_stops_after_detach(monkeypatch):
         removed.test_name.logical_ancestry, [removed.test_name, removed]
     )
     assert removed.test_name.logical_root is removed
+
+
+def test_same_logical_location_for_same_retrieved_metadata(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+
+    first = f.metadata["meta1"]
+    second = f.metadata["meta1"]
+
+    assert first.same_logical_location_as(second)
+    assert first.test_name.same_logical_location_as(second.test_name)
+
+
+def test_same_logical_location_false_for_same_path_different_roots(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f1 = escdf.ESCDF()
+    f2 = escdf.ESCDF()
+
+    f1.add_metadata(make_minimal_metadata("meta1"))
+    f2.add_metadata(make_minimal_metadata("meta1"))
+
+    md1 = f1.metadata["meta1"]
+    md2 = f2.metadata["meta1"]
+
+    assert md1.logical_path == md2.logical_path
+    assert not md1.same_logical_location_as(md2)
+    assert not md1.test_name.same_logical_location_as(md2.test_name)
+
+
+def test_same_logical_location_false_after_remove(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+    f.add_metadata(make_minimal_metadata("meta1"))
+
+    attached = f.metadata["meta1"]
+    removed = f.remove_metadata("meta1")
+
+    assert attached is removed
+    assert removed.logical_parent is None
+    assert removed.same_logical_location_as(removed)

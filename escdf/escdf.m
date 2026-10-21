@@ -131,6 +131,16 @@ classdef escdf < handle
             ancestry = {obj};
         end
 
+        function path = get_logical_path(obj)
+        % Return the root-relative logical path for this container.
+        %
+        % Returns
+        % -------
+        % path : char
+        %     Root logical path, always '/'.
+            path = '/';
+        end
+
         function root = get_logical_root(obj)
         % Return the root of this logical graph.
         %
@@ -139,6 +149,42 @@ classdef escdf < handle
         % root : escdf
         %     This container.
             root = obj;
+        end
+
+        function tf = same_logical_location_as(obj, other)
+        % Return whether this object occupies the same logical location as
+        % another object.
+        %
+        % Parameters
+        % ----------
+        % other : object
+        %     Object to compare against.
+        %
+        % Returns
+        % -------
+        % tf : logical
+        %     True if both objects have the same logical ancestry by handle
+        %     identity.
+            tf = false;
+
+            if ~ismethod(other, 'get_logical_ancestry')
+                return
+            end
+
+            this_ancestry = obj.get_logical_ancestry();
+            other_ancestry = other.get_logical_ancestry();
+
+            if length(this_ancestry) ~= length(other_ancestry)
+                return
+            end
+
+            for i = 1:length(this_ancestry)
+                if ~(this_ancestry{i} == other_ancestry{i})
+                    return
+                end
+            end
+
+            tf = true;
         end
 
         function set_created_properties(obj, created_by, created_date)

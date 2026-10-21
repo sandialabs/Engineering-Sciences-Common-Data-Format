@@ -187,6 +187,18 @@ class ESCDFActivity:
         ancestry = self.logical_ancestry
         return ancestry[-1] if ancestry else None
 
+    def same_logical_location_as(self, other):
+        if not hasattr(other, "logical_ancestry"):
+            return False
+
+        this_ancestry = self.logical_ancestry
+        other_ancestry = other.logical_ancestry
+
+        if len(this_ancestry) != len(other_ancestry):
+            return False
+
+        return all(a is b for a, b in zip(this_ancestry, other_ancestry))
+
     def __init__(
         self,
         short_name,

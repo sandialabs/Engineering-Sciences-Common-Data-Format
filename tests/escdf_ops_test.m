@@ -1369,5 +1369,104 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             testCase.verifyEmpty(removed.get_logical_parent());
         end
 
+        function test_same_logical_location_for_same_retrieved_metadata(testCase)
+            f = escdf();
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md);
+
+            first = f.get_metadata('meta1');
+            second = f.get_metadata('meta1');
+
+            testCase.verifyTrue(first.same_logical_location_as(second));
+            testCase.verifyTrue(first.test_name.same_logical_location_as(second.test_name));
+        end
+
+        function test_same_logical_location_false_for_same_path_different_roots(testCase)
+            f1 = escdf();
+            f2 = escdf();
+
+            f1.add_metadata(escdf_ops_test.make_minimal_metadata('meta1'));
+            f2.add_metadata(escdf_ops_test.make_minimal_metadata('meta1'));
+
+            md1 = f1.get_metadata('meta1');
+            md2 = f2.get_metadata('meta1');
+
+            testCase.verifyEqual(md1.get_logical_path(), md2.get_logical_path());
+            testCase.verifyFalse(md1.same_logical_location_as(md2));
+            testCase.verifyFalse(md1.test_name.same_logical_location_as(md2.test_name));
+        end
+
+        function test_same_logical_location_true_for_self_after_remove(testCase)
+            f = escdf();
+            f.add_metadata(escdf_ops_test.make_minimal_metadata('meta1'));
+
+            removed = f.remove_metadata('meta1');
+
+            testCase.verifyEmpty(removed.get_logical_parent());
+            testCase.verifyTrue(removed.same_logical_location_as(removed));
+        end
+
+        function test_logical_paths_for_metadata_dataset_and_property(testCase)
+            f = escdf();
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md);
+
+            attached_md = f.get_metadata('meta1');
+
+            testCase.verifyEqual(f.get_logical_path(), '/');
+            testCase.verifyEqual(attached_md.get_logical_path(), '/meta1');
+            testCase.verifyEqual(attached_md.test_name.get_logical_path(), '/meta1/test_name');
+        end
+
+        function test_logical_paths_for_activity_data_and_property(testCase)
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+
+            data = escdf_ops_test.make_minimal_data('data1');
+            f.add_data_to_activity('act1', data);
+
+            activity = f.get_activity('act1');
+            attached_data = activity.get_data('data1');
+
+            testCase.verifyEqual(activity.get_logical_path(), '/activities/act1');
+            testCase.verifyEqual(attached_data.get_logical_path(), '/activities/act1/data1');
+            testCase.verifyEqual(attached_data.value.get_logical_path(), '/activities/act1/data1/value');
+        end
+
+        function test_free_objects_have_no_logical_path(testCase)
+            ds = escdf_ops_test.make_minimal_metadata('free_meta');
+
+            testCase.verifyEmpty(ds.get_logical_path());
+            testCase.verifyEmpty(ds.test_name.get_logical_path());
+        end
+
+        function test_same_logical_location_requires_same_root(testCase)
+            f1 = escdf();
+            f2 = escdf();
+
+            f1.add_metadata(escdf_ops_test.make_minimal_metadata('meta1'));
+            f2.add_metadata(escdf_ops_test.make_minimal_metadata('meta1'));
+
+            md1 = f1.get_metadata('meta1');
+            md2 = f2.get_metadata('meta1');
+
+            testCase.verifyEqual(md1.get_logical_path(), md2.get_logical_path());
+            testCase.verifyFalse(md1.same_logical_location_as(md2));
+            testCase.verifyFalse(md1.test_name.same_logical_location_as(md2.test_name));
+        end
+
+        function test_same_logical_location_for_repeated_retrieval(testCase)
+            f = escdf();
+            f.add_metadata(escdf_ops_test.make_minimal_metadata('meta1'));
+
+            first = f.get_metadata('meta1');
+            second = f.get_metadata('meta1');
+
+            testCase.verifySameHandle(first, second);
+            testCase.verifyTrue(first.same_logical_location_as(second));
+            testCase.verifyTrue(first.test_name.same_logical_location_as(second.test_name));
+        end
+
     end
 end

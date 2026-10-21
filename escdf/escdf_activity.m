@@ -281,6 +281,58 @@ classdef escdf_activity < handle
             root = ancestry{end};
         end
 
+        function path = get_logical_path(obj)
+        % Return the root-relative logical path for this activity.
+        %
+        % Returns
+        % -------
+        % path : char or []
+        %     Logical path if attached to a container, otherwise empty.
+            parent = obj.get_logical_parent();
+            if isempty(parent)
+                path = [];
+                return
+            end
+
+            path = ['/activities/', obj.get_name()];
+        end
+
+        function tf = same_logical_location_as(obj, other)
+        % Return whether this object occupies the same logical location as
+        % another object.
+        %
+        % Parameters
+        % ----------
+        % other : object
+        %     Object to compare against.
+        %
+        % Returns
+        % -------
+        % tf : logical
+        %     True if both objects have the same logical ancestry by handle
+        %     identity.
+            tf = false;
+
+            if ~ismethod(other, 'get_logical_ancestry')
+                return
+            end
+
+            this_ancestry = obj.get_logical_ancestry();
+            other_ancestry = other.get_logical_ancestry();
+
+            if length(this_ancestry) ~= length(other_ancestry)
+                return
+            end
+
+            for i = 1:length(this_ancestry)
+                if ~(this_ancestry{i} == other_ancestry{i})
+                    return
+                end
+            end
+
+            tf = true;
+        end
+
         function add_data(obj,dataset)
         % Add a result dataset to the activity.
         %
