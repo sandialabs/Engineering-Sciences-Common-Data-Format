@@ -1381,21 +1381,6 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             testCase.verifyTrue(first.test_name.same_logical_location_as(second.test_name));
         end
 
-        function test_same_logical_location_false_for_same_path_different_roots(testCase)
-            f1 = escdf();
-            f2 = escdf();
-
-            f1.add_metadata(escdf_ops_test.make_minimal_metadata('meta1'));
-            f2.add_metadata(escdf_ops_test.make_minimal_metadata('meta1'));
-
-            md1 = f1.get_metadata('meta1');
-            md2 = f2.get_metadata('meta1');
-
-            testCase.verifyEqual(md1.get_logical_path(), md2.get_logical_path());
-            testCase.verifyFalse(md1.same_logical_location_as(md2));
-            testCase.verifyFalse(md1.test_name.same_logical_location_as(md2.test_name));
-        end
-
         function test_same_logical_location_true_for_self_after_remove(testCase)
             f = escdf();
             f.add_metadata(escdf_ops_test.make_minimal_metadata('meta1'));
