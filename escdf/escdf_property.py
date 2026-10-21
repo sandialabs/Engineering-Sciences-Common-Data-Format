@@ -13,6 +13,8 @@ import os
 import warnings
 import weakref
 
+from .backing import HDF5Location
+
 VERBOSE = False
 
 
@@ -358,16 +360,13 @@ class ESCDFProperty:
 
         Returns
         -------
-        tuple or None
-            ``(filename, object_path)`` if the property is HDF5-backed,
-            otherwise ``None``.
+        HDF5Location or None
+            Current HDF5 backing location if HDF5-backed, otherwise
+            ``None``.
         """
         if self.in_memory:
             return None
-        return (
-            self._normalize_hdf5_filename(self.h5_dataset.file.filename),
-            self.h5_dataset.name,
-        )
+        return HDF5Location.from_h5_object(self.h5_dataset)
 
     def target_hdf5_location(self, h5_group):
         """
@@ -380,13 +379,10 @@ class ESCDFProperty:
 
         Returns
         -------
-        tuple
-            ``(filename, object_path)`` for the target dataset location.
+        HDF5Location
+            Expected HDF5 dataset location.
         """
-        return (
-            self._normalize_hdf5_filename(h5_group.file.filename),
-            self._child_path(h5_group.name, self.name),
-        )
+        return HDF5Location.child_of_group(h5_group, self.name)
 
     def is_realized_at(self, h5_group):
         """
@@ -400,10 +396,40 @@ class ESCDFProperty:
         Returns
         -------
         bool
-            ``True`` if this property is HDF5-backed at exactly the target
+            True if this property is HDF5-backed at exactly the target
             dataset location.
         """
-        return self.hdf5_location == self.target_hdf5_location(h5_group)
+        current = self.hdf5_location
+        if current is None:
+            return False
+        return current.same_location_as(self.target_hdf5_location(h5_group))
+
+    def same_backing_location_as(self, other):
+        """
+        Return whether this property has the same HDF5 backing location as
+        another property.
+
+        Parameters
+        ----------
+        other : object
+            Object to compare against.
+
+        Returns
+        -------
+        bool
+            True if both properties are HDF5-backed at the same HDF5
+            location.
+        """
+        if not hasattr(other, "hdf5_location"):
+            return False
+
+        this_location = self.hdf5_location
+        other_location = other.hdf5_location
+
+        if this_location is None or other_location is None:
+            return False
+
+        return this_location.same_location_as(other_location)
 
     def realize_to_hdf5(self, h5_group, strategy="memory", overwrite=False):
         """

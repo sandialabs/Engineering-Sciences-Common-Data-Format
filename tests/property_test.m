@@ -383,6 +383,39 @@ classdef property_test < matlab.unittest.TestCase
             testCase.verifyEqual(count, 5);
         end
 
-    end
+        function test_hdf5_location_object_compares_same_location(testCase)
+            prop1 = escdf_property('p1', 'f8', [3], 'hdf5groupid', testCase.file_id);
+            prop1(:) = [1.0; 2.0; 3.0];
 
+            dataset_id = H5D.open(testCase.file_id, 'p1');
+            prop2 = escdf_property.load(dataset_id);
+
+            testCase.verifyFalse(prop1 == prop2);
+            testCase.verifyTrue(prop1.same_backing_location_as(prop2));
+
+            H5D.close(dataset_id);
+        end
+
+        function test_memory_properties_do_not_have_same_backing_location(testCase)
+            prop1 = escdf_property('p1', 'f8', [3]);
+            prop2 = escdf_property('p1', 'f8', [3]);
+
+            testCase.verifyTrue(isempty(prop1.get_hdf5_location()));
+            testCase.verifyTrue(isempty(prop2.get_hdf5_location()));
+            testCase.verifyFalse(prop1.same_backing_location_as(prop2));
+        end
+
+        function test_target_hdf5_location_uses_group_and_property_name(testCase)
+            group_id = H5G.create(testCase.file_id, 'my_group', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+            prop = escdf_property('p1', 'f8', [3]);
+            location = prop.get_target_hdf5_location(group_id);
+
+            testCase.verifyEqual(location.object_path, '/my_group/p1');
+
+            H5G.close(group_id);
+        end
+
+    end
+    
 end

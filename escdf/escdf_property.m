@@ -308,25 +308,20 @@ classdef escdf_property < handle
         function id = get_h5d_id(obj)
             id = obj.h5d_id;
         end
+
         function location = get_hdf5_location(obj)
         % Return the current HDF5 backing location.
         %
         % Returns
         % -------
-        % location : struct or empty
-        %     Struct with fields file_name and object_path, or empty if
-        %     the property is memory-backed.
+        % location : HDF5Location or []
+        %     Current HDF5 backing location if HDF5-backed, otherwise empty.
             if obj.inmemory
                 location = [];
                 return
             end
 
-            file_id = H5I.get_file_id(obj.h5d_id);
-            file_name = H5F.get_name(file_id);
-            H5F.close(file_id);
-
-            location.file_name = char(java.io.File(file_name).getCanonicalPath());
-            location.object_path = H5I.get_name(obj.h5d_id);
+            location = HDF5Location.from_hdf5_id(obj.h5d_id);
         end
 
         function parent = get_logical_parent(obj)
@@ -454,21 +449,9 @@ classdef escdf_property < handle
         %
         % Returns
         % -------
-        % location : struct
-        %     Struct with fields file_name and object_path.
-            file_id = H5I.get_file_id(h5g_id);
-            file_name = H5F.get_name(file_id);
-            H5F.close(file_id);
-
-            group_path = H5I.get_name(h5g_id);
-            if strcmp(group_path, '/')
-                object_path = ['/', obj.name];
-            else
-                object_path = [group_path, '/', obj.name];
-            end
-
-            location.file_name = char(java.io.File(file_name).getCanonicalPath());
-            location.object_path = object_path;
+        % location : HDF5Location
+        %     Expected HDF5 location of this property.
+            location = HDF5Location.child_of_group(h5g_id, obj.name);
         end
 
         function tf = is_realized_at(obj, h5g_id)
@@ -491,8 +474,37 @@ classdef escdf_property < handle
             end
 
             target = obj.get_target_hdf5_location(h5g_id);
-            tf = strcmp(current.file_name, target.file_name) && ...
-                 strcmp(current.object_path, target.object_path);
+            tf = current.same_location_as(target);
+        end
+
+        function tf = same_backing_location_as(obj, other)
+        % Return whether this property has the same HDF5 backing location
+        % as another property.
+        %
+        % Parameters
+        % ----------
+        % other : object
+        %     Object to compare against.
+        %
+        % Returns
+        % -------
+        % tf : logical
+        %     True if both properties are HDF5-backed at the same HDF5
+        %     location.
+            tf = false;
+
+            if ~ismethod(other, 'get_hdf5_location')
+                return
+            end
+
+            this_location = obj.get_hdf5_location();
+            other_location = other.get_hdf5_location();
+
+            if isempty(this_location) || isempty(other_location)
+                return
+            end
+
+            tf = this_location.same_location_as(other_location);
         end
 
         function obj = realize_to_hdf5(obj, h5g_id, strategy, overwrite)
