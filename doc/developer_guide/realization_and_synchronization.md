@@ -428,17 +428,18 @@ This relationship is critical for synchronization and realization.
 
 ## Recommended Equality Semantics
 
-The default equality operator should probably represent semantic equality.
+Python and MATLAB differ in their object identity conventions.
 
-Separate helpers should be used for other relationships, such as:
+In Python, object identity is checked with `is`, while `==` may be
+implemented as semantic/value equality.
 
-```text
-same_logical_location_as(other)
-same_backing_location_as(other)
-is same object / handle identity
-```
+In MATLAB, ESCDF objects are handle classes, so `==` is preserved as
+handle identity. Semantic equality, if needed, should be implemented with
+an explicit method such as `semantic_equals` rather than by overloading
+`==`.
 
-This avoids overloading one equality operator with too many meanings.
+This preserves normal MATLAB behavior while maintaining conceptual parity
+between implementations.
 
 ---
 
