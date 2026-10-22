@@ -46,6 +46,7 @@ classdef escdf_dataset < handle & dynamicprops
         backing_state;
         version;
         logical_parent;
+        hdf5_location;
     end
 
     methods
@@ -84,6 +85,7 @@ classdef escdf_dataset < handle & dynamicprops
             obj.has_modified_properties = false;
             obj.has_pending_changes = false;
             obj.backing_state = 'memory';
+            obj.hdf5_location = [];
             obj.name = name;
             obj.dataset_type = dataset_type;
             obj.descriptive_name = descriptive_name;
@@ -355,6 +357,107 @@ classdef escdf_dataset < handle & dynamicprops
             tf = true;
         end
 
+        function location = get_hdf5_location(obj)
+        % Return the current HDF5 backing location for this dataset.
+        %
+        % Returns
+        % -------
+        % location : HDF5Location or []
+        %     HDF5 group location if HDF5-backed, otherwise empty.
+            location = obj.hdf5_location;
+        end
+
+        function location = get_target_hdf5_location(obj, parent_group_id)
+        % Return the HDF5 location this dataset would occupy under a parent group.
+        %
+        % Parameters
+        % ----------
+        % parent_group_id : numeric
+        %     Parent HDF5 group or file identifier.
+        %
+        % Returns
+        % -------
+        % location : HDF5Location
+        %     Expected HDF5 group location for this dataset.
+            location = HDF5Location.child_of_group(parent_group_id, obj.get_name());
+        end
+
+        function tf = is_realized_at(obj, hdf5_group_id)
+        % Return whether this dataset is already realized at an HDF5 group.
+        %
+        % Parameters
+        % ----------
+        % hdf5_group_id : numeric
+        %     HDF5 group identifier representing the target dataset.
+        %
+        % Returns
+        % -------
+        % tf : logical
+        %     True if this dataset is HDF5-backed at exactly the given
+        %     group location.
+            current = obj.get_hdf5_location();
+            if isempty(current)
+                tf = false;
+                return
+            end
+
+            target = HDF5Location.from_hdf5_id(hdf5_group_id);
+            tf = current.same_location_as(target);
+        end
+
+        function tf = is_realized_under(obj, parent_group_id)
+        % Return whether this dataset is already realized under a parent group.
+        %
+        % Parameters
+        % ----------
+        % parent_group_id : numeric
+        %     Parent HDF5 group or file identifier.
+        %
+        % Returns
+        % -------
+        % tf : logical
+        %     True if this dataset is HDF5-backed at the expected child
+        %     location under the parent group.
+            current = obj.get_hdf5_location();
+            if isempty(current)
+                tf = false;
+                return
+            end
+
+            target = obj.get_target_hdf5_location(parent_group_id);
+            tf = current.same_location_as(target);
+        end
+
+        function tf = same_backing_location_as(obj, other)
+        % Return whether this dataset has the same HDF5 backing location
+        % as another dataset.
+        %
+        % Parameters
+        % ----------
+        % other : object
+        %     Object to compare against.
+        %
+        % Returns
+        % -------
+        % tf : logical
+        %     True if both datasets are HDF5-backed at the same HDF5 group
+        %     location.
+            tf = false;
+
+            if ~ismethod(other, 'get_hdf5_location')
+                return
+            end
+
+            this_location = obj.get_hdf5_location();
+            other_location = other.get_hdf5_location();
+
+            if isempty(this_location) || isempty(other_location)
+                return
+            end
+
+            tf = this_location.same_location_as(other_location);
+        end
+
         function out = validate(obj,hide_issues,report)
         % Validate dataset properties against the active specification.
         %
@@ -463,6 +566,7 @@ classdef escdf_dataset < handle & dynamicprops
                     property.read_into_memory();
                 end
             end
+            obj.hdf5_location = [];
             obj.backing_state = 'memory';
         end
 
@@ -524,6 +628,7 @@ classdef escdf_dataset < handle & dynamicprops
             H5T.close(str_type_id);
             H5S.close(attr_space_id);
 
+            obj.hdf5_location = HDF5Location.from_hdf5_id(hdf5_group_id);
             obj.backing_state = 'hdf5_native';
             obj.has_pending_changes = false;
         end
@@ -1431,6 +1536,7 @@ classdef escdf_dataset < handle & dynamicprops
                 addprop(obj,extra_dataset);
                 obj.(extra_dataset) = prop;
             end
+            obj.hdf5_location = HDF5Location.from_hdf5_id(group_id);
             obj.backing_state = 'hdf5_native';
             obj.has_pending_changes = false;
         end

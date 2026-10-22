@@ -7,18 +7,19 @@ metadata and activity-result datasets in memory and on disk according to
 the ESCDF specification files.
 """
 
-import warnings
-import re
 import os
+import re
+import warnings
 import weakref
 
-import numpy as np
 import h5py as h5
+import numpy as np
 
+from .backing import HDF5Location
 from .escdf_property import ESCDFProperty, RaggedArray
-from .valid_names import is_valid_identifier, make_valid_identifier
 from .model import SpecificationRegistry
 from .model.validation import validate_dataset_against_resolved_specification
+from .valid_names import is_valid_identifier, make_valid_identifier
 
 VERBOSE = False
 
@@ -327,6 +328,103 @@ class ESCDFDataset:
 
         return all(a is b for a, b in zip(this_ancestry, other_ancestry))
 
+    @property
+    def hdf5_location(self):
+        """
+        Return the current HDF5 backing location for this dataset.
+
+        Returns
+        -------
+        HDF5Location or None
+            HDF5 group location if HDF5-backed, otherwise ``None``.
+        """
+        return self._hdf5_location
+
+    def target_hdf5_location(self, parent_group):
+        """
+        Return the HDF5 location this dataset would occupy under a parent group.
+
+        Parameters
+        ----------
+        parent_group : h5py.Group or h5py.File
+            Parent HDF5 group or file.
+
+        Returns
+        -------
+        HDF5Location
+            Expected HDF5 group location for this dataset.
+        """
+        return HDF5Location.child_of_group(parent_group, self.name)
+
+    def is_realized_at(self, h5_group):
+        """
+        Return whether this dataset is already realized at an HDF5 group.
+
+        Parameters
+        ----------
+        h5_group : h5py.Group
+            HDF5 group representing the target dataset.
+
+        Returns
+        -------
+        bool
+            ``True`` if this dataset is HDF5-backed at exactly the given
+            group location.
+        """
+        if self.hdf5_location is None:
+            return False
+        return self.hdf5_location.same_location_as(
+            HDF5Location.from_h5_object(h5_group)
+        )
+
+    def is_realized_under(self, parent_group):
+        """
+        Return whether this dataset is already realized under a parent group.
+
+        Parameters
+        ----------
+        parent_group : h5py.Group or h5py.File
+            Parent HDF5 group or file.
+
+        Returns
+        -------
+        bool
+            ``True`` if this dataset is HDF5-backed at the expected child
+            location under the parent group.
+        """
+        if self.hdf5_location is None:
+            return False
+        return self.hdf5_location.same_location_as(
+            self.target_hdf5_location(parent_group)
+        )
+
+    def same_backing_location_as(self, other):
+        """
+        Return whether this dataset has the same HDF5 backing location as
+        another dataset.
+
+        Parameters
+        ----------
+        other : object
+            Object to compare against.
+
+        Returns
+        -------
+        bool
+            ``True`` if both datasets are HDF5-backed at the same HDF5
+            group location.
+        """
+        if not hasattr(other, "hdf5_location"):
+            return False
+
+        this_location = self.hdf5_location
+        other_location = other.hdf5_location
+
+        if this_location is None or other_location is None:
+            return False
+
+        return this_location.same_location_as(other_location)
+
     @has_modified_properties.setter
     def has_modified_properties(self, val):
         if not isinstance(val, bool):
@@ -381,6 +479,7 @@ class ESCDFDataset:
         self._modified_properties = set()
         self._has_pending_changes = False
         self._backing_state = "memory"
+        self._hdf5_location = None
         self._logical_parent_ref = None
 
         resolved_specification = _get_resolved_specification(self.dataset_type)
@@ -414,6 +513,7 @@ class ESCDFDataset:
             "_version",
             "_logical_parent_ref",
             "logical_parent",
+            "_hdf5_location",
         ]:
             super().__setattr__(name, value)
         elif name in self._valid_properties:
@@ -920,6 +1020,7 @@ class ESCDFDataset:
             self._modified_properties.add(extra_dataset)
             setattr(self, extra_dataset, h5_dataset)
 
+        self._hdf5_location = HDF5Location.from_h5_object(h5_group)
         self._backing_state = "hdf5_native"
         self._has_pending_changes = False
         return self
@@ -959,6 +1060,7 @@ class ESCDFDataset:
         h5_group.attrs["_descriptive_name"] = self.descriptive_name
         h5_group.attrs["_version"] = self._version
 
+        self._hdf5_location = HDF5Location.from_h5_object(h5_group)
         self._backing_state = "hdf5_native"
         self._has_pending_changes = False
 
@@ -991,6 +1093,7 @@ class ESCDFDataset:
             property_ = getattr(self, name)
             if property_ is not None:
                 property_.read_into_memory()
+        self._hdf5_location = None
         self._backing_state = "memory"
 
     def set_attachments(self, filenames):

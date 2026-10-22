@@ -670,6 +670,81 @@ classdef dataset_test < matlab.unittest.TestCase
             H5F.close(file_id);
         end
 
+        function test_dataset_hdf5_location_is_empty_for_memory_dataset(testCase)
+            ds = escdf_dataset('d1', 'scalar', 'Scalar metadata');
+
+            testCase.verifyTrue(isempty(ds.get_hdf5_location()));
+        end
+
+        function test_loaded_dataset_hdf5_location_matches_group(testCase)
+            outfile = fullfile(testCase.temp_folder, 'dataset_location.h5');
+
+            f = escdf();
+            md = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
+            md.value = 2.0;
+            md.unit = {'g'};
+            f.add_metadata(md);
+            f.write_to_disk(outfile, true);
+
+            loaded = escdf.load(outfile);
+            loaded_md = loaded.get_metadata('meta1');
+
+            location = loaded_md.get_hdf5_location();
+            testCase.verifyFalse(isempty(location));
+            testCase.verifyEqual(location.object_path, '/meta1');
+        end
+
+        function test_dataset_same_backing_location_for_two_wrappers(testCase)
+            outfile = fullfile(testCase.temp_folder, 'dataset_same_backing.h5');
+
+            f = escdf();
+            md = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
+            md.value = 2.0;
+            md.unit = {'g'};
+            f.add_metadata(md);
+            f.write_to_disk(outfile, true);
+
+            file_id = H5F.open(outfile, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
+            group_id_1 = H5G.open(file_id, 'meta1');
+            group_id_2 = H5G.open(file_id, 'meta1');
+
+            ds1 = escdf_dataset.load([outfile,'::/meta1'], true);
+            ds2 = escdf_dataset.load([outfile,'::/meta1'], true);
+
+            testCase.verifyFalse(ds1 == ds2);
+            testCase.verifyTrue(ds1.same_backing_location_as(ds2));
+
+            H5G.close(group_id_1);
+            H5G.close(group_id_2);
+            H5F.close(file_id);
+        end
+
+        function test_dataset_target_hdf5_location_uses_parent_group(testCase)
+            group_id = H5G.create(testCase.file_id, 'parent', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+            ds = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
+            location = ds.get_target_hdf5_location(group_id);
+
+            testCase.verifyEqual(location.object_path, '/parent/meta1');
+
+            H5G.close(group_id);
+        end
+
+        function test_dataset_is_realized_at_true_after_realization(testCase)
+            group_id = H5G.create(testCase.file_id, 'meta1', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+            ds = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
+            ds.value = 2.0;
+            ds.unit = {'g'};
+
+            ds.realize_to_hdf5(group_id);
+
+            testCase.verifyTrue(ds.is_realized_at(group_id));
+            testCase.verifyTrue(ds.is_realized_under(testCase.file_id));
+
+            H5G.close(group_id);
+        end
+
     end
 
 end

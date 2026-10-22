@@ -711,3 +711,87 @@ def test_dataset_realize_to_hdf5_writes_properties_and_attributes(tmp_path):
 
     assert ds.backing_state == "hdf5_native"
     assert ds.has_pending_changes is False
+
+
+def test_dataset_hdf5_location_is_none_for_memory_dataset(hdf5_and_properties):
+    hdf5_file_path, property_names, property_values, escdf = hdf5_and_properties
+
+    ds = escdf.Dataset("d1", "scalar", "Scalar metadata")
+
+    assert ds.hdf5_location is None
+
+
+def test_loaded_dataset_hdf5_location_matches_group(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "dataset_location.h5"
+
+    f = escdf.ESCDF()
+    md = escdf.Dataset("meta1", "scalar", "Scalar metadata")
+    md.value = 2.0
+    md.unit = "g"
+    f.add_metadata(md)
+    f.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path))
+    loaded_md = loaded.metadata["meta1"]
+
+    assert loaded_md.hdf5_location is not None
+    assert loaded_md.hdf5_location.object_path == "/meta1"
+
+
+def test_dataset_same_backing_location_for_two_wrappers(tmp_path):
+    file_path = tmp_path / "dataset_same_backing.h5"
+
+    with h5py.File(file_path, "w") as h5_file:
+        group = h5_file.create_group("meta1")
+        group.attrs["_specification_name"] = "scalar"
+        group.attrs["_descriptive_name"] = "Scalar metadata"
+        group.attrs["_version"] = (0, 1, 0)
+
+        value = group.create_dataset("value", shape=(), dtype="f8")
+        value.attrs["data_type"] = "f8"
+        value[()] = 2.0
+
+        unit = group.create_dataset(
+            "unit", shape=(), dtype=h5py.string_dtype(encoding="utf-8")
+        )
+        unit.attrs["data_type"] = "str"
+        unit[()] = "g"
+
+        ds1 = escdf.Dataset.load(h5_group=group)
+        ds2 = escdf.Dataset.load(h5_group=group)
+
+        assert ds1 is not ds2
+        assert ds1.same_backing_location_as(ds2)
+
+
+def test_dataset_target_hdf5_location_uses_parent_group(tmp_path):
+    file_path = tmp_path / "dataset_target_location.h5"
+
+    with h5py.File(file_path, "w") as h5_file:
+        parent = h5_file.create_group("parent")
+        ds = escdf.Dataset("meta1", "scalar", "Scalar metadata")
+
+        location = ds.target_hdf5_location(parent)
+
+        assert location.object_path == "/parent/meta1"
+
+
+def test_dataset_is_realized_at_true_after_realization(tmp_path):
+    file_path = tmp_path / "dataset_realized_at.h5"
+
+    ds = escdf.Dataset("meta1", "scalar", "Scalar metadata")
+    ds.value = 2.0
+    ds.unit = "g"
+
+    with h5py.File(file_path, "w") as h5_file:
+        group = h5_file.create_group("meta1")
+        ds.realize_to_hdf5(group)
+
+        assert ds.is_realized_at(group)
+        assert ds.is_realized_under(h5_file)
