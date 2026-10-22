@@ -41,6 +41,7 @@ classdef escdf_activity < handle
         backing_state;
         has_pending_changes;
         logical_parent;
+        hdf5_location;
     end
 
     methods
@@ -103,6 +104,7 @@ classdef escdf_activity < handle
             end
 
             obj.backing_state = 'memory';
+            obj.hdf5_location = [];
             obj.has_pending_changes = false;
         end
 
@@ -331,6 +333,119 @@ classdef escdf_activity < handle
             end
 
             tf = true;
+        end
+
+        function location = get_hdf5_location(obj)
+        % Return the current HDF5 backing location for this activity.
+        %
+        % Returns
+        % -------
+        % location : HDF5Location or []
+        %     HDF5 group location if HDF5-backed, otherwise empty.
+            location = obj.hdf5_location;
+        end
+
+        function set_hdf5_location(obj, location)
+        % Set the current HDF5 backing location for this activity.
+        %
+        % Parameters
+        % ----------
+        % location : HDF5Location or []
+        %     HDF5 group location, or empty for memory-backed.
+            obj.hdf5_location = location;
+        end
+
+        function location = get_target_hdf5_location(obj, activities_group_id)
+        % Return the HDF5 location this activity would occupy under an
+        % activities group.
+        %
+        % Parameters
+        % ----------
+        % activities_group_id : numeric
+        %     HDF5 activities group identifier.
+        %
+        % Returns
+        % -------
+        % location : HDF5Location
+        %     Expected HDF5 group location for this activity.
+            location = HDF5Location.child_of_group(activities_group_id, obj.get_name());
+        end
+
+        function tf = is_realized_at(obj, activity_group_id)
+        % Return whether this activity is already realized at an HDF5 group.
+        %
+        % Parameters
+        % ----------
+        % activity_group_id : numeric
+        %     HDF5 group identifier representing the target activity.
+        %
+        % Returns
+        % -------
+        % tf : logical
+        %     True if this activity is HDF5-backed at exactly the given
+        %     group location.
+            current = obj.get_hdf5_location();
+            if isempty(current)
+                tf = false;
+                return
+            end
+
+            target = HDF5Location.from_hdf5_id(activity_group_id);
+            tf = current.same_location_as(target);
+        end
+
+        function tf = is_realized_under(obj, activities_group_id)
+        % Return whether this activity is already realized under an
+        % activities parent group.
+        %
+        % Parameters
+        % ----------
+        % activities_group_id : numeric
+        %     HDF5 activities group identifier.
+        %
+        % Returns
+        % -------
+        % tf : logical
+        %     True if this activity is HDF5-backed at the expected child
+        %     location under the activities group.
+            current = obj.get_hdf5_location();
+            if isempty(current)
+                tf = false;
+                return
+            end
+
+            target = obj.get_target_hdf5_location(activities_group_id);
+            tf = current.same_location_as(target);
+        end
+
+        function tf = same_backing_location_as(obj, other)
+        % Return whether this activity has the same HDF5 backing location
+        % as another activity.
+        %
+        % Parameters
+        % ----------
+        % other : object
+        %     Object to compare against.
+        %
+        % Returns
+        % -------
+        % tf : logical
+        %     True if both activities are HDF5-backed at the same HDF5
+        %     group location.
+            tf = false;
+
+            if ~ismethod(other, 'get_hdf5_location')
+                return
+            end
+
+            this_location = obj.get_hdf5_location();
+            other_location = other.get_hdf5_location();
+
+            if isempty(this_location) || isempty(other_location)
+                return
+            end
+
+            tf = this_location.same_location_as(other_location);
         end
 
         function add_data(obj,dataset)
@@ -680,6 +795,7 @@ classdef escdf_activity < handle
                 H5G.close(this_gid);
             end
 
+            obj.hdf5_location = HDF5Location.from_hdf5_id(gid);
             obj.backing_state = 'hdf5_native';
             obj.has_pending_changes = false;
 

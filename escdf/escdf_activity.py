@@ -7,14 +7,17 @@ This module defines :class:`ESCDFActivity` and
 and links to metadata datasets.
 """
 
+import datetime as dt
 import weakref
+
+import h5py as h5
+import numpy as np
+
+from .backing import HDF5Location
 from .escdf_dataset import ESCDFDataset, ESCDFDatasetArray
 from .escdf_property import ESCDFProperty
 from .escdf_timestamps import _datetime_from_iso_utc, _datetime_to_iso_utc
 from .valid_names import is_valid_identifier, make_valid_identifier
-import numpy as np
-import h5py as h5
-import datetime as dt
 
 
 class ESCDFActivity:
@@ -61,6 +64,7 @@ class ESCDFActivity:
         "_descriptive_name",
         "_activity_date",
         "_backing_state",
+        "_hdf5_location",
         "_has_pending_changes",
         "_logical_parent_ref",
         "__weakref__",
@@ -199,6 +203,105 @@ class ESCDFActivity:
 
         return all(a is b for a, b in zip(this_ancestry, other_ancestry))
 
+    @property
+    def hdf5_location(self):
+        """
+        Return the current HDF5 backing location for this activity.
+
+        Returns
+        -------
+        HDF5Location or None
+            HDF5 group location if HDF5-backed, otherwise ``None``.
+        """
+        return self._hdf5_location
+
+    def target_hdf5_location(self, activities_group):
+        """
+        Return the HDF5 location this activity would occupy under an
+        activities group.
+
+        Parameters
+        ----------
+        activities_group : h5py.Group
+            HDF5 ``/activities`` group.
+
+        Returns
+        -------
+        HDF5Location
+            Expected HDF5 group location for this activity.
+        """
+        return HDF5Location.child_of_group(activities_group, self.name)
+
+    def is_realized_at(self, activity_group):
+        """
+        Return whether this activity is already realized at an HDF5 group.
+
+        Parameters
+        ----------
+        activity_group : h5py.Group
+            HDF5 group representing the target activity.
+
+        Returns
+        -------
+        bool
+            ``True`` if this activity is HDF5-backed at exactly the given
+            group location.
+        """
+        if self.hdf5_location is None:
+            return False
+        return self.hdf5_location.same_location_as(
+            HDF5Location.from_h5_object(activity_group)
+        )
+
+    def is_realized_under(self, activities_group):
+        """
+        Return whether this activity is already realized under an activities
+        parent group.
+
+        Parameters
+        ----------
+        activities_group : h5py.Group
+            HDF5 ``/activities`` group.
+
+        Returns
+        -------
+        bool
+            ``True`` if this activity is HDF5-backed at the expected child
+            location under the activities group.
+        """
+        if self.hdf5_location is None:
+            return False
+        return self.hdf5_location.same_location_as(
+            self.target_hdf5_location(activities_group)
+        )
+
+    def same_backing_location_as(self, other):
+        """
+        Return whether this activity has the same HDF5 backing location as
+        another activity.
+
+        Parameters
+        ----------
+        other : object
+            Object to compare against.
+
+        Returns
+        -------
+        bool
+            ``True`` if both activities are HDF5-backed at the same HDF5
+            group location.
+        """
+        if not hasattr(other, "hdf5_location"):
+            return False
+
+        this_location = self.hdf5_location
+        other_location = other.hdf5_location
+
+        if this_location is None or other_location is None:
+            return False
+
+        return this_location.same_location_as(other_location)
+
     def __init__(
         self,
         short_name,
@@ -261,6 +364,7 @@ class ESCDFActivity:
             self._metadata_links = [value for value in metadata_links]
 
         self._backing_state = "memory"
+        self._hdf5_location = None
         self._has_pending_changes = False
         self._logical_parent_ref = None
 
@@ -575,6 +679,7 @@ class ESCDFActivity:
                 overwrite=overwrite,
             )
 
+        self._hdf5_location = HDF5Location.from_h5_object(activity_group)
         self._backing_state = "hdf5_native"
         self._has_pending_changes = False
 

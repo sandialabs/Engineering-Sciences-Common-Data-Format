@@ -1453,5 +1453,132 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             testCase.verifyTrue(first.test_name.same_logical_location_as(second.test_name));
         end
 
+        function test_activity_hdf5_location_is_empty_for_memory_activity(testCase)
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            activity = escdf_activity('act1', 'Activity one', when);
+
+            testCase.verifyTrue(isempty(activity.get_hdf5_location()));
+        end
+
+        function test_loaded_activity_hdf5_location_matches_group(testCase)
+            outfile = fullfile(testCase.temp_folder, 'activity_location.h5');
+
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+            data = escdf_ops_test.make_minimal_data('data1');
+            f.add_data_to_activity('act1', data);
+            f.write_to_disk(outfile, true);
+
+            loaded = escdf.load(outfile);
+            activity = loaded.get_activity('act1');
+
+            location = activity.get_hdf5_location();
+            testCase.verifyFalse(isempty(location));
+            testCase.verifyEqual(location.object_path, '/activities/act1');
+        end
+
+        function test_activity_same_backing_location_for_two_wrappers(testCase)
+            outfile = fullfile(testCase.temp_folder, 'activity_same_backing.h5');
+
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+            data = escdf_ops_test.make_minimal_data('data1');
+            f.add_data_to_activity('act1', data);
+            f.write_to_disk(outfile, true);
+
+            loaded1 = escdf.load(outfile);
+            loaded2 = escdf.load(outfile);
+
+            act1 = loaded1.get_activity('act1');
+            act2 = loaded2.get_activity('act1');
+
+            testCase.verifyFalse(act1 == act2);
+            testCase.verifyTrue(act1.same_backing_location_as(act2));
+        end
+
+        function test_activity_target_hdf5_location_uses_activities_group(testCase)
+            file_id = H5F.create(fullfile(testCase.temp_folder, 'activity_target_location.h5'), ...
+                'H5F_ACC_TRUNC', 'H5P_DEFAULT', 'H5P_DEFAULT');
+            activities_group = H5G.create(file_id, 'activities', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            activity = escdf_activity('act1', 'Activity one', when);
+
+            location = activity.get_target_hdf5_location(activities_group);
+
+            testCase.verifyEqual(location.object_path, '/activities/act1');
+
+            H5G.close(activities_group);
+            H5F.close(file_id);
+        end
+
+        function test_activity_is_realized_at_true_after_realization(testCase)
+            file_id = H5F.create(fullfile(testCase.temp_folder, 'activity_realized_at.h5'), ...
+                'H5F_ACC_TRUNC', 'H5P_DEFAULT', 'H5P_DEFAULT');
+            activities_group = H5G.create(file_id, 'activities', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            activity = escdf_activity('act1', 'Activity one', when);
+            data = escdf_ops_test.make_minimal_data('data1');
+            activity.add_data(data);
+
+            activity.realize_to_hdf5(activities_group);
+
+            act_group = H5G.open(activities_group, 'act1');
+
+            testCase.verifyTrue(activity.is_realized_under(activities_group));
+            testCase.verifyTrue(activity.is_realized_at(act_group));
+
+            H5G.close(act_group);
+            H5G.close(activities_group);
+            H5F.close(file_id);
+        end
+
+        function test_container_hdf5_location_is_empty_for_memory_container(testCase)
+            f = escdf();
+
+            testCase.verifyTrue(isempty(f.get_hdf5_location()));
+        end
+
+        function test_loaded_container_hdf5_location_matches_file(testCase)
+            outfile = fullfile(testCase.temp_folder, 'container_location.h5');
+
+            f = escdf();
+            f.write_to_disk(outfile, true);
+
+            loaded = escdf.load(outfile);
+
+            location = loaded.get_hdf5_location();
+            testCase.verifyFalse(isempty(location));
+            testCase.verifyEqual(location.object_path, '/');
+        end
+
+        function test_container_same_backing_location_for_two_wrappers(testCase)
+            outfile = fullfile(testCase.temp_folder, 'container_same_backing.h5');
+
+            f = escdf();
+            f.write_to_disk(outfile, true);
+
+            loaded1 = escdf.load(outfile);
+            loaded2 = escdf.load(outfile);
+
+            testCase.verifyFalse(loaded1 == loaded2);
+            testCase.verifyTrue(loaded1.same_backing_location_as(loaded2));
+        end
+
+        function test_container_is_realized_at_true_after_realization(testCase)
+            outfile = fullfile(testCase.temp_folder, 'container_realized_at.h5');
+            file_id = H5F.create(outfile, 'H5F_ACC_TRUNC', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+            f = escdf();
+            f.realize_to_hdf5(file_id);
+
+            testCase.verifyTrue(f.is_realized_at(file_id));
+
+            H5F.close(file_id);
+        end
+
     end
 end

@@ -1548,3 +1548,155 @@ def test_same_logical_location_false_after_remove(monkeypatch):
     assert attached is removed
     assert removed.logical_parent is None
     assert removed.same_logical_location_as(removed)
+
+
+def test_activity_hdf5_location_is_none_for_memory_activity():
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    activity = escdf.Activity("act1", "Activity one", when)
+
+    assert activity.hdf5_location is None
+
+
+def test_loaded_activity_hdf5_location_matches_group(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "activity_location.h5"
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+    data = make_minimal_data("data1")
+    f.add_data_to_activity("act1", data)
+    f.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path))
+    activity = loaded.activities["act1"]
+
+    assert activity.hdf5_location is not None
+    assert activity.hdf5_location.object_path == "/activities/act1"
+
+
+def test_activity_same_backing_location_for_two_wrappers(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "activity_same_backing.h5"
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+    data = make_minimal_data("data1")
+    f.add_data_to_activity("act1", data)
+    f.write_to_disk(str(file_path))
+
+    loaded1 = escdf.ESCDF.load(str(file_path))
+    loaded2 = escdf.ESCDF.load(str(file_path))
+
+    act1 = loaded1.activities["act1"]
+    act2 = loaded2.activities["act1"]
+
+    assert act1 is not act2
+    assert act1.same_backing_location_as(act2)
+
+
+def test_activity_target_hdf5_location_uses_activities_group(tmp_path):
+    file_path = tmp_path / "activity_target_location.h5"
+
+    with h5py.File(file_path, "w") as h5_file:
+        activities_group = h5_file.create_group("activities")
+
+        when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+        activity = escdf.Activity("act1", "Activity one", when)
+
+        location = activity.target_hdf5_location(activities_group)
+
+        assert location.object_path == "/activities/act1"
+
+
+def test_activity_is_realized_at_true_after_realization(tmp_path):
+    file_path = tmp_path / "activity_realized_at.h5"
+
+    with h5py.File(file_path, "w") as h5_file:
+        activities_group = h5_file.create_group("activities")
+
+        when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+        activity = escdf.Activity("act1", "Activity one", when)
+        data = make_minimal_data("data1")
+        activity.add_data(data)
+
+        activity.realize_to_hdf5(activities_group)
+
+        assert activity.is_realized_under(activities_group)
+        assert activity.is_realized_at(activities_group["act1"])
+
+
+def test_container_hdf5_location_is_none_for_memory_container(monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    f = escdf.ESCDF()
+
+    assert f.hdf5_location is None
+
+
+def test_loaded_container_hdf5_location_matches_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "container_location.h5"
+
+    f = escdf.ESCDF()
+    f.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path))
+
+    assert loaded.hdf5_location is not None
+    assert loaded.hdf5_location.object_path == "/"
+
+
+def test_container_same_backing_location_for_two_wrappers(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "container_same_backing.h5"
+
+    f = escdf.ESCDF()
+    f.write_to_disk(str(file_path))
+
+    loaded1 = escdf.ESCDF.load(str(file_path))
+    loaded2 = escdf.ESCDF.load(str(file_path))
+
+    assert loaded1 is not loaded2
+    assert loaded1.same_backing_location_as(loaded2)
+
+
+def test_container_is_realized_at_true_after_realization(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "container_realized_at.h5"
+
+    f = escdf.ESCDF()
+
+    with h5py.File(file_path, "w") as h5_file:
+        f.realize_to_hdf5(h5_file)
+        assert f.is_realized_at(h5_file)

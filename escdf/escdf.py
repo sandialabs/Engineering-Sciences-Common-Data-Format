@@ -9,23 +9,25 @@ for an ESCDF HDF5 file.
 
 from __future__ import annotations
 
-import numpy as np
-import h5py as h5
-import warnings
-from .escdf_activity import ESCDFActivity, ESCDFActivityArray
-from .escdf_dataset import ESCDFDataset, ESCDFDatasetArray
-from .escdf_property import ESCDFProperty
-from .escdf_timestamps import _datetime_to_iso_utc, _datetime_from_iso_utc
-from .valid_names import is_valid_identifier, make_valid_identifier
+import datetime as dt
 import json
 import os
 import sys
 import tempfile
+import warnings
 import weakref
-
-import datetime as dt
 from datetime import datetime, timezone
 from pathlib import Path
+
+import h5py as h5
+import numpy as np
+
+from .backing import HDF5Location
+from .escdf_activity import ESCDFActivity, ESCDFActivityArray
+from .escdf_dataset import ESCDFDataset, ESCDFDatasetArray
+from .escdf_property import ESCDFProperty
+from .escdf_timestamps import _datetime_from_iso_utc, _datetime_to_iso_utc
+from .valid_names import is_valid_identifier, make_valid_identifier
 
 LIB_DISPLAY_NAME = "ESCDF"  # folder name on Windows/macOS
 LIB_ID = "escdf"  # folder name on Linux (conventionally lowercase)
@@ -64,15 +66,16 @@ class ESCDF:
     """
 
     __slots__ = (
+        "__weakref__",
         "_activities",
-        "_metadata",
+        "_backing_state",
         "_created_by",
         "_created_date",
-        "_lifecycle_state",
-        "_mutability_state",
-        "_backing_state",
         "_has_pending_changes",
-        "__weakref__",
+        "_hdf5_location",
+        "_lifecycle_state",
+        "_metadata",
+        "_mutability_state",
     )
 
     @property
@@ -156,6 +159,53 @@ class ESCDF:
 
         return all(a is b for a, b in zip(this_ancestry, other_ancestry))
 
+    @property
+    def hdf5_location(self):
+        """
+        Return the current HDF5 backing location for this container.
+
+        Returns
+        -------
+        HDF5Location or None
+            HDF5 file/root location if HDF5-backed, otherwise ``None``.
+        """
+        return self._hdf5_location
+
+    def is_realized_at(self, h5_file):
+        """
+        Return whether this container is already realized at an HDF5 file.
+
+        Parameters
+        ----------
+        h5_file : h5py.File
+            Target HDF5 file.
+
+        Returns
+        -------
+        bool
+            True if this container is HDF5-backed at the same file/root
+            location.
+        """
+        if self.hdf5_location is None:
+            return False
+        return self.hdf5_location.same_location_as(HDF5Location.from_h5_object(h5_file))
+
+    def same_backing_location_as(self, other):
+        """
+        Return whether this container has the same HDF5 backing location as
+        another container.
+        """
+        if not hasattr(other, "hdf5_location"):
+            return False
+
+        this_location = self.hdf5_location
+        other_location = other.hdf5_location
+
+        if this_location is None or other_location is None:
+            return False
+
+        return this_location.same_location_as(other_location)
+
     def __init__(self):
         """
         Initialize an empty ESCDF container.
@@ -173,6 +223,7 @@ class ESCDF:
         self._lifecycle_state = "draft"
         self._mutability_state = "editable"
         self._backing_state = "memory"
+        self._hdf5_location = None
         self._has_pending_changes = False
 
     def set_created_properties(self, created_by, created_date=None):
@@ -959,9 +1010,7 @@ class ESCDF:
         for metadata in self.metadata:
             if not metadata.validate():
                 raise ValueError(
-                    "Cannot write to disk, metadata {:} is invalid.".format(
-                        metadata.name
-                    )
+                    f"Cannot write to disk, metadata {metadata.name} is invalid."
                 )
 
         # Validate activity data
@@ -969,9 +1018,7 @@ class ESCDF:
             for data in activity.data:
                 if not data.validate():
                     raise ValueError(
-                        "Cannot write to disk, data {:} from activity {:} is invalid.".format(
-                            data.name, activity.name
-                        )
+                        f"Cannot write to disk, data {data.name} from activity {activity.name} is invalid."
                     )
 
         # File-level attributes
@@ -1020,6 +1067,7 @@ class ESCDF:
 
         self._backing_state = "hdf5_native"
         self._has_pending_changes = False
+        self._hdf5_location = HDF5Location.from_h5_object(h5_file)
         h5_file.flush()
         return h5_file
 
@@ -1188,6 +1236,9 @@ class ESCDF:
                 dataset = ESCDFDataset.load(h5_group=activity_group[activity_data_name])
                 escdf_file._insert_data_to_activity_native(valid_activity_name, dataset)
                 loaded_activity = escdf_file.activities[valid_activity_name]
+                loaded_activity._hdf5_location = HDF5Location.from_h5_object(
+                    activity_group
+                )
                 loaded_activity._backing_state = "hdf5_native"
                 loaded_activity._has_pending_changes = False
 
@@ -1195,6 +1246,7 @@ class ESCDF:
         escdf_file._lifecycle_state = "draft"
         escdf_file._mutability_state = "read_only" if readonly else "editable"
         escdf_file._has_pending_changes = False
+        escdf_file._hdf5_location = HDF5Location.from_h5_object(h5_file)
         return escdf_file
 
     @staticmethod

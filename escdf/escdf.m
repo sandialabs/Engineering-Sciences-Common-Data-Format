@@ -39,6 +39,7 @@ classdef escdf < handle
         mutability_state
         backing_state
         has_pending_changes
+        hdf5_location
     end
 
     properties (Dependent)
@@ -64,6 +65,7 @@ classdef escdf < handle
             obj.mutability_state = 'editable';
             obj.backing_state = 'memory';
             obj.has_pending_changes = false;
+            obj.hdf5_location = [];
         end
 
         function out = get_created_by(obj)
@@ -185,6 +187,47 @@ classdef escdf < handle
             end
 
             tf = true;
+        end
+
+        function location = get_hdf5_location(obj)
+        % Return the current HDF5 backing location for this container.
+            location = obj.hdf5_location;
+        end
+
+        function set_hdf5_location(obj, location)
+        % Set the current HDF5 backing location for this container.
+            obj.hdf5_location = location;
+        end
+
+        function tf = is_realized_at(obj, file_id)
+        % Return whether this container is already realized at an HDF5 file.
+            current = obj.get_hdf5_location();
+            if isempty(current)
+                tf = false;
+                return
+            end
+
+            target = HDF5Location.from_hdf5_id(file_id);
+            tf = current.same_location_as(target);
+        end
+
+        function tf = same_backing_location_as(obj, other)
+        % Return whether this container has the same HDF5 backing location
+        % as another container.
+            tf = false;
+
+            if ~ismethod(other, 'get_hdf5_location')
+                return
+            end
+
+            this_location = obj.get_hdf5_location();
+            other_location = other.get_hdf5_location();
+
+            if isempty(this_location) || isempty(other_location)
+                return
+            end
+
+            tf = this_location.same_location_as(other_location);
         end
 
         function set_created_properties(obj, created_by, created_date)
@@ -1088,6 +1131,7 @@ classdef escdf < handle
 
             obj.backing_state = 'hdf5_native';
             obj.has_pending_changes = false;
+            obj.hdf5_location = HDF5Location.from_hdf5_id(file_id);
         end
 
         function file_id = write_to_disk(obj,file_path,clobber)
@@ -1355,6 +1399,7 @@ classdef escdf < handle
                 end
 
                 loaded_activity = escdf_file.get_activity(valid_activity_name);
+                loaded_activity.set_hdf5_location(HDF5Location(hdf5_path, ['/activities/', activity_name]));
                 loaded_activity.set_backing_state('hdf5_native');
                 loaded_activity.set_has_pending_changes(false);
             end
@@ -1366,6 +1411,7 @@ classdef escdf < handle
                 escdf_file.mutability_state = 'editable';
             end
             escdf_file.has_pending_changes = false;
+            escdf_file.set_hdf5_location(HDF5Location(hdf5_path, '/'));
         end
 
         function escdf_file = build_from_struct(structure)
