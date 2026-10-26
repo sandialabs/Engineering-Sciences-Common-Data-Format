@@ -497,7 +497,7 @@ classdef property_test < matlab.unittest.TestCase
 
             testCase.verifyTrue(loaded_md.value.can_write_through_current_hdf5_backing());
 
-            loaded_md.value(:) = 5.0;
+            loaded_md.value(:) = single(5.0);
 
             testCase.verifyFalse(loaded_md.value.isinmemory());
             testCase.verifyEqual(double(loaded_md.value(:)), 5.0);
