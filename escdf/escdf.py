@@ -185,6 +185,67 @@ class ESCDF:
             return False
         return self.hdf5_location.same_location_as(HDF5Location.from_h5_object(h5_file))
 
+    def needs_realization(self, h5_file):
+        """
+        Return whether this container needs realization into an HDF5 file.
+
+        Parameters
+        ----------
+        h5_file : h5py.File
+            Target HDF5 file.
+
+        Returns
+        -------
+        bool
+            ``True`` if the container or any child object is not already
+            realized at the target file.
+        """
+        if not self.is_realized_at(h5_file):
+            return True
+
+        if h5_file.attrs.get("created_by", None) != self.created_by:
+            return True
+
+        if h5_file.attrs.get("created_date", None) != _datetime_to_iso_utc(
+            self.created_date
+        ):
+            return True
+
+        logical_metadata_names = set(self.metadata.names)
+        target_metadata_names = {
+            key
+            for key in h5_file.keys()
+            if key != "activities" and isinstance(h5_file[key], h5.Group)
+        }
+
+        if logical_metadata_names != target_metadata_names:
+            return True
+
+        for metadata in self.metadata:
+            if metadata.needs_realization(h5_file):
+                return True
+
+        if "activities" not in h5_file:
+            return True
+
+        activities_group = h5_file["activities"]
+
+        logical_activity_names = set(self.activities.names)
+        target_activity_names = {
+            key
+            for key in activities_group.keys()
+            if isinstance(activities_group[key], h5.Group)
+        }
+
+        if logical_activity_names != target_activity_names:
+            return True
+
+        for activity in self.activities:
+            if activity.needs_realization(activities_group):
+                return True
+
+        return False
+
     def same_backing_location_as(self, other):
         """
         Return whether this container has the same HDF5 backing location as

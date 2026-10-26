@@ -270,6 +270,68 @@ class ESCDFActivity:
             self.target_hdf5_location(activities_group)
         )
 
+    def needs_realization(self, activities_group):
+        """
+        Return whether this activity needs realization under an activities group.
+
+        Parameters
+        ----------
+        activities_group : h5py.Group
+            HDF5 ``/activities`` group under which this activity should be
+            realized.
+
+        Returns
+        -------
+        bool
+            ``True`` if the activity or any contained dataset is not already
+            realized at the expected target location.
+        """
+        if self.name not in activities_group:
+            return True
+
+        target_group = activities_group[self.name]
+
+        if not self.is_realized_at(target_group):
+            return True
+
+        # Activity attributes are part of the realized group.
+        if target_group.attrs.get("activity_name", None) != self.descriptive_name:
+            return True
+
+        if target_group.attrs.get("activity_date", None) != _datetime_to_iso_utc(
+            self.activity_date
+        ):
+            return True
+
+        # Metadata links are stored in the parameters dataset.
+        if "parameters" not in target_group:
+            return True
+
+        parameters = target_group["parameters"][...]
+        parameters = [
+            item.decode() if isinstance(item, (bytes, np.bytes_)) else item
+            for item in parameters
+        ]
+
+        if list(parameters) != list(self.metadata_links):
+            return True
+
+        logical_dataset_names = set(self.data.names)
+        target_dataset_names = {
+            key
+            for key in target_group.keys()
+            if isinstance(target_group[key], h5.Group)
+        }
+
+        if logical_dataset_names != target_dataset_names:
+            return True
+
+        for dataset in self.data:
+            if dataset.needs_realization(target_group):
+                return True
+
+        return False
+
     def same_backing_location_as(self, other):
         """
         Return whether this activity has the same HDF5 backing location as

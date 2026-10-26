@@ -204,6 +204,76 @@ classdef escdf < handle
             tf = current.same_location_as(target);
         end
 
+        function tf = needs_realization(obj, file_id)
+        % Return whether this container needs realization into an HDF5 file.
+        %
+        % Parameters
+        % ----------
+        % file_id : numeric
+        %     Target HDF5 file identifier.
+        %
+        % Returns
+        % -------
+        % tf : logical
+        %     True if the container or any child object is not already
+        %     realized at the target file.
+            tf = true;
+
+            if ~obj.is_realized_at(file_id)
+                return
+            end
+
+            info = h5info(obj.get_hdf5_location().file_path, '/');
+
+            logical_metadata_names = obj.get_metadata_names();
+
+            target_metadata_names = {};
+            for i = 1:length(info.Groups)
+                [~, nm] = fileparts(info.Groups(i).Name);
+                if ~strcmp(nm, 'activities')
+                    target_metadata_names{end+1} = nm; %#ok<AGROW>
+                end
+            end
+
+            if ~isequal(sort(logical_metadata_names), sort(target_metadata_names))
+                return
+            end
+
+            for i = 1:length(obj.metadata)
+                if obj.metadata(i).needs_realization(file_id)
+                    return
+                end
+            end
+
+            if H5L.exists(file_id, 'activities', 'H5P_DEFAULT') == 0
+                return
+            end
+
+            activities_group_id = H5G.open(file_id, 'activities');
+            cleanup = onCleanup(@() H5G.close(activities_group_id));
+
+            logical_activity_names = obj.get_activity_names();
+
+            activity_info = h5info(obj.get_hdf5_location().file_path, '/activities');
+            target_activity_names = {};
+            for i = 1:length(activity_info.Groups)
+                [~, nm] = fileparts(activity_info.Groups(i).Name);
+                target_activity_names{end+1} = nm; %#ok<AGROW>
+            end
+            
+            if ~isequal(sort(logical_activity_names(:)), sort(target_activity_names(:)))
+                return
+            end
+
+            for i = 1:length(obj.activities)
+                if obj.activities(i).needs_realization(activities_group_id)
+                    return
+                end
+            end
+
+            tf = false;
+        end
+
         function tf = same_backing_location_as(obj, other)
         % Return whether this container has the same HDF5 backing location
         % as another container.

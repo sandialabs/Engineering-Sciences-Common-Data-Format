@@ -463,7 +463,7 @@ classdef escdf_dataset < handle & dynamicprops
             target_info = h5info(obj.get_hdf5_location().file_path, obj.get_hdf5_location().object_path);
             target_property_names = {target_info.Datasets.Name};
 
-            if ~isequal(sort(present_property_names), sort(target_property_names))
+            if ~isequal(sort(present_property_names(:)), sort(target_property_names(:)))
                 return
             end
 

@@ -401,6 +401,59 @@ classdef escdf_activity < handle
             tf = current.same_location_as(target);
         end
 
+        function tf = needs_realization(obj, activities_group_id)
+        % Return whether this activity needs realization under an activities group.
+        %
+        % Parameters
+        % ----------
+        % activities_group_id : numeric
+        %     HDF5 activities group identifier.
+        %
+        % Returns
+        % -------
+        % tf : logical
+        %     True if the activity or any contained dataset is not already
+        %     realized at the expected target location.
+            tf = true;
+
+            if H5L.exists(activities_group_id, obj.get_name(), 'H5P_DEFAULT') == 0
+                return
+            end
+
+            activity_group_id = H5G.open(activities_group_id, obj.get_name());
+            cleanup = onCleanup(@() H5G.close(activity_group_id));
+
+            if ~obj.is_realized_at(activity_group_id)
+                return
+            end
+
+            logical_data_names = obj.get_data_names();
+
+            info = h5info(obj.get_hdf5_location().file_path, obj.get_hdf5_location().object_path);
+            child_group_names = {info.Groups.Name};
+
+            target_data_names = {};
+            prefix = [obj.get_hdf5_location().object_path, '/'];
+            for i = 1:length(child_group_names)
+                [~, nm] = fileparts(child_group_names{i});
+                if ~strcmp(nm, 'parameters')
+                    target_data_names{end+1} = nm; %#ok<AGROW>
+                end
+            end
+
+            if ~isequal(sort(logical_data_names(:)), sort(target_data_names(:)))
+                return
+            end
+
+            for i = 1:length(obj.data)
+                if obj.data(i).needs_realization(activity_group_id)
+                    return
+                end
+            end
+
+            tf = false;
+        end
+
         function tf = same_backing_location_as(obj, other)
         % Return whether this activity has the same HDF5 backing location
         % as another activity.

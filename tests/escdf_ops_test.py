@@ -1710,3 +1710,91 @@ def test_container_is_realized_at_true_after_realization(tmp_path, monkeypatch):
     with h5py.File(file_path, "w") as h5_file:
         f.realize_to_hdf5(h5_file)
         assert f.is_realized_at(h5_file)
+
+
+def test_activity_needs_realization_false_after_write(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "activity_needs_realization_false.h5"
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+    data = make_minimal_data("data1")
+    f.add_data_to_activity("act1", data)
+    f.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path))
+    activity = loaded.activities["act1"]
+
+    with h5py.File(file_path, "r") as h5_file:
+        assert not activity.needs_realization(h5_file["activities"])
+
+
+def test_activity_needs_realization_true_after_rename_data(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "activity_needs_realization_rename.h5"
+
+    f = escdf.ESCDF()
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    f.add_activity("act1", "Activity one", when)
+    data = make_minimal_data("data1")
+    f.add_data_to_activity("act1", data)
+    f.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path))
+    activity = loaded.activities["act1"]
+    activity.rename_data("data1", "data2")
+
+    with h5py.File(file_path, "r") as h5_file:
+        assert activity.needs_realization(h5_file["activities"])
+
+
+def test_container_needs_realization_false_after_write(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "container_needs_realization_false.h5"
+
+    f = escdf.ESCDF()
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+    f.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path))
+
+    with h5py.File(file_path, "r") as h5_file:
+        assert not loaded.needs_realization(h5_file)
+
+
+def test_container_needs_realization_true_after_metadata_rename(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "container_needs_realization_rename.h5"
+
+    f = escdf.ESCDF()
+    md = make_minimal_metadata("meta1")
+    f.add_metadata(md)
+    f.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path))
+    loaded.rename_metadata("meta1", "meta2")
+
+    with h5py.File(file_path, "r") as h5_file:
+        assert loaded.needs_realization(h5_file)

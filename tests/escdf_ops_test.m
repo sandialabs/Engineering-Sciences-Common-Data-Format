@@ -1583,5 +1583,85 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             H5F.close(file_id);
         end
 
+        function test_activity_needs_realization_false_after_write(testCase)
+            outfile = fullfile(testCase.temp_folder, 'activity_needs_realization_false.h5');
+
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+            data = escdf_ops_test.make_minimal_data('data1');
+            f.add_data_to_activity('act1', data);
+            f.write_to_disk(outfile, true);
+
+            loaded = escdf.load(outfile);
+            activity = loaded.get_activity('act1');
+
+            file_id = H5F.open(outfile, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
+            activities_group_id = H5G.open(file_id, 'activities');
+
+            testCase.verifyFalse(activity.needs_realization(activities_group_id));
+
+            H5G.close(activities_group_id);
+            H5F.close(file_id);
+        end
+
+        function test_activity_needs_realization_true_after_rename_data(testCase)
+            outfile = fullfile(testCase.temp_folder, 'activity_needs_realization_rename.h5');
+
+            f = escdf();
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+            f.add_activity('act1', 'Activity one', when);
+            data = escdf_ops_test.make_minimal_data('data1');
+            f.add_data_to_activity('act1', data);
+            f.write_to_disk(outfile, true);
+
+            loaded = escdf.load(outfile);
+            activity = loaded.get_activity('act1');
+            activity.rename_data('data1', 'data2');
+
+            file_id = H5F.open(outfile, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
+            activities_group_id = H5G.open(file_id, 'activities');
+
+            testCase.verifyTrue(activity.needs_realization(activities_group_id));
+
+            H5G.close(activities_group_id);
+            H5F.close(file_id);
+        end
+
+        function test_container_needs_realization_false_after_write(testCase)
+            outfile = fullfile(testCase.temp_folder, 'container_needs_realization_false.h5');
+
+            f = escdf();
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md);
+            f.write_to_disk(outfile, true);
+
+            loaded = escdf.load(outfile);
+
+            file_id = H5F.open(outfile, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
+
+            testCase.verifyFalse(loaded.needs_realization(file_id));
+
+            H5F.close(file_id);
+        end
+
+        function test_container_needs_realization_true_after_metadata_rename(testCase)
+            outfile = fullfile(testCase.temp_folder, 'container_needs_realization_rename.h5');
+
+            f = escdf();
+            md = escdf_ops_test.make_minimal_metadata('meta1');
+            f.add_metadata(md);
+            f.write_to_disk(outfile, true);
+
+            loaded = escdf.load(outfile);
+            loaded.rename_metadata('meta1', 'meta2');
+
+            file_id = H5F.open(outfile, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
+
+            testCase.verifyTrue(loaded.needs_realization(file_id));
+
+            H5F.close(file_id);
+        end
+
     end
 end
