@@ -277,14 +277,14 @@ def test_storage_and_recall(
 
 def test_new_in_memory_property_starts_memory_backed():
     prop = escdf.Property("p1", "f8", (3,))
-    assert prop.backing_state == "memory"
+    assert prop.hdf5_location is None
     assert prop.in_memory is True
 
 
 def test_new_hdf5_property_starts_hdf5_native(hdf5_file_path):
     hdf5_file = h5py.File(hdf5_file_path, "r+")
     prop = escdf.Property("p1", "f8", (3,), hdf5group=hdf5_file)
-    assert prop.backing_state == "hdf5_native"
+    assert prop.hdf5_location is not None
     assert prop.in_memory is False
     hdf5_file.close()
 
@@ -294,7 +294,7 @@ def test_loaded_property_starts_hdf5_native(hdf5_file_path):
     prop, parent, root = make_hdf5_property_with_logical_context(
         escdf,
         hdf5_file,
-        f"p1_parent",
+        "p1_parent",
         "p1",
         "f8",
         (3,),
@@ -303,7 +303,7 @@ def test_loaded_property_starts_hdf5_native(hdf5_file_path):
     prop[...] = np.array([1.0, 2.0, 3.0], dtype=np.float64)
 
     loaded = escdf.Property.load(h5_dataset=prop.h5_dataset)
-    assert loaded.backing_state == "hdf5_native"
+    assert loaded.hdf5_location is not None
     assert loaded.in_memory is False
     hdf5_file.close()
 
@@ -313,7 +313,7 @@ def test_read_into_memory_sets_backing_state_to_memory(hdf5_file_path):
     prop, parent, root = make_hdf5_property_with_logical_context(
         escdf,
         hdf5_file,
-        f"p1_parent",
+        "p1_parent",
         "p1",
         "f8",
         (3,),
@@ -323,7 +323,7 @@ def test_read_into_memory_sets_backing_state_to_memory(hdf5_file_path):
 
     prop.read_into_memory()
 
-    assert prop.backing_state == "memory"
+    assert prop.hdf5_location is None
     assert prop.in_memory is True
     np.testing.assert_allclose(prop[...], np.array([1.0, 2.0, 3.0]))
     hdf5_file.close()

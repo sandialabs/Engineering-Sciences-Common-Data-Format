@@ -38,7 +38,6 @@ classdef escdf_activity < handle
         name;
         descriptive_name;
         activity_date;
-        backing_state;
         has_pending_changes;
         logical_parent;
         hdf5_location;
@@ -103,7 +102,6 @@ classdef escdf_activity < handle
                 error('activity_date must be a datetime object')
             end
 
-            obj.backing_state = 'memory';
             obj.hdf5_location = [];
             obj.has_pending_changes = false;
         end
@@ -202,16 +200,6 @@ classdef escdf_activity < handle
             date = obj.activity_date;
         end
 
-        function out = get_backing_state(obj)
-        % Return the activity backing state.
-        %
-        % Returns
-        % -------
-        % out : char
-        %     Activity backing state.
-            out = obj.backing_state;
-        end
-
         function out = get_has_pending_changes(obj)
         % Return whether the activity has pending changes.
         %
@@ -221,11 +209,6 @@ classdef escdf_activity < handle
         %     True if the activity has pending changes relative to its
         %     current authoritative/reference state.
             out = obj.has_pending_changes;
-        end
-
-        function set_backing_state(obj, state)
-        % Set the activity backing state.
-            obj.backing_state = state;
         end
 
         function set_has_pending_changes(obj, tf)
@@ -796,7 +779,6 @@ classdef escdf_activity < handle
             end
 
             obj.hdf5_location = HDF5Location.from_hdf5_id(gid);
-            obj.backing_state = 'hdf5_native';
             obj.has_pending_changes = false;
 
             H5G.close(gid)

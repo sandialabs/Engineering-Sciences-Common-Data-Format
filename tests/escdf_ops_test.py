@@ -244,7 +244,7 @@ def test_new_escdf_container_starts_in_expected_state(monkeypatch):
 
     assert f.lifecycle_state == "draft"
     assert f.mutability_state == "editable"
-    assert f.backing_state == "memory"
+    assert f.hdf5_location is None
     assert f.has_pending_changes is False
     assert f.created_by == "unit_test_user"
     assert f.created_date.tzinfo is not None
@@ -282,11 +282,11 @@ def test_write_to_disk_sets_hdf5_native_and_clears_pending_changes(
     f.add_metadata(md)
 
     assert f.has_pending_changes is True
-    assert f.backing_state == "memory"
+    assert f.hdf5_location is None
 
     f.write_to_disk(str(file_path))
 
-    assert f.backing_state == "hdf5_native"
+    assert f.hdf5_location is not None
     assert f.has_pending_changes is False
 
 
@@ -308,7 +308,7 @@ def test_loaded_escdf_container_starts_in_expected_state_readonly(
 
     loaded = escdf.ESCDF.load(str(file_path), readonly=True)
 
-    assert loaded.backing_state == "hdf5_native"
+    assert loaded.hdf5_location is not None
     assert loaded.lifecycle_state == "draft"
     assert loaded.mutability_state == "read_only"
     assert loaded.has_pending_changes is False
@@ -332,7 +332,7 @@ def test_loaded_escdf_container_starts_in_expected_state_editable(
 
     loaded = escdf.ESCDF.load(str(file_path), readonly=False)
 
-    assert loaded.backing_state == "hdf5_native"
+    assert loaded.hdf5_location is not None
     assert loaded.lifecycle_state == "draft"
     assert loaded.mutability_state == "editable"
     assert loaded.has_pending_changes is False
@@ -375,10 +375,10 @@ def test_add_metadata_clones_in_memory_dataset_wrapper(monkeypatch):
     assert attached_md is not source_md
 
     # In-memory properties should remain memory-backed in the clone.
-    assert attached_md.test_name.backing_state == "memory"
-    assert attached_md.program.backing_state == "memory"
-    assert attached_md.hardware_list.backing_state == "memory"
-    assert attached_md.point_of_contact.backing_state == "memory"
+    assert attached_md.test_name.hdf5_location is None
+    assert attached_md.program.hdf5_location is None
+    assert attached_md.hardware_list.hdf5_location is None
+    assert attached_md.point_of_contact.hdf5_location is None
 
     # Values should match.
     assert attached_md.test_name[...] == "Original Test Name"
@@ -495,8 +495,8 @@ def test_add_data_to_activity_clones_dataset_wrapper(monkeypatch):
     assert attached_data is not source_data
 
     # In-memory property remains memory-backed.
-    assert attached_data.value.backing_state == "memory"
-    assert attached_data.unit.backing_state == "memory"
+    assert attached_data.value.hdf5_location is None
+    assert attached_data.unit.hdf5_location is None
 
     assert attached_data.value[...] == np.float64(9.81)
     assert attached_data.unit[...] == "m/s^2"
@@ -529,7 +529,7 @@ def test_add_hdf5_native_data_to_activity_creates_external_backed_clone(
     loaded_data = loaded.activities["act1"]["data1"]
 
     # Loaded source should be native HDF5-backed.
-    assert loaded_data.value.backing_state == "hdf5_native"
+    assert loaded_data.value.hdf5_location is not None
 
     target = escdf.ESCDF()
     target.add_activity("act2", "Activity two", when)
@@ -549,7 +549,7 @@ def test_new_activity_starts_in_expected_state():
     when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
     activity = escdf.Activity("act1", "Activity one", when)
 
-    assert activity.backing_state == "memory"
+    assert activity.hdf5_location is None
     assert activity.has_pending_changes is False
 
 
@@ -593,7 +593,7 @@ def test_loaded_activity_starts_hdf5_native_with_no_pending_changes(
     loaded = escdf.ESCDF.load(str(file_path))
     loaded_activity = loaded.activities["act1"]
 
-    assert loaded_activity.backing_state == "hdf5_native"
+    assert loaded_activity.hdf5_location is not None
     assert loaded_activity.has_pending_changes is False
 
 
@@ -607,12 +607,12 @@ def test_activity_write_to_disk_sets_hdf5_native_and_clears_pending_changes(tmp_
     data = make_minimal_data("data1")
     activity.add_data(data)
 
-    assert activity.backing_state == "memory"
+    assert activity.hdf5_location is None
     assert activity.has_pending_changes is True
 
     activity.write_to_disk(activity_group)
 
-    assert activity.backing_state == "hdf5_native"
+    assert activity.hdf5_location is not None
     assert activity.has_pending_changes is False
 
     h5_file.close()
@@ -1073,7 +1073,7 @@ def test_activity_realize_to_hdf5_writes_datasets_and_links(tmp_path):
     assert "value" in activity_group["data1"]
     assert "unit" in activity_group["data1"]
 
-    assert activity.backing_state == "hdf5_native"
+    assert activity.hdf5_location is not None
     assert activity.has_pending_changes is False
 
     h5_file.close()
@@ -1110,7 +1110,7 @@ def test_container_realize_to_hdf5_writes_metadata_and_activities(
         assert "data1" in h5_file["activities"]["act1"]
         assert "parameters" in h5_file["activities"]["act1"]
 
-    assert f.backing_state == "hdf5_native"
+    assert f.hdf5_location is not None
     assert f.has_pending_changes is False
 
 

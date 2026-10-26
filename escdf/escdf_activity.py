@@ -63,7 +63,6 @@ class ESCDFActivity:
         "_name",
         "_descriptive_name",
         "_activity_date",
-        "_backing_state",
         "_hdf5_location",
         "_has_pending_changes",
         "_logical_parent_ref",
@@ -111,10 +110,6 @@ class ESCDFActivity:
         if not isinstance(value, dt.datetime):
             raise ValueError("`activity_date` must be a datetime.datetime object.")
         self._activity_date = value
-
-    @property
-    def backing_state(self):
-        return self._backing_state
 
     @property
     def has_pending_changes(self):
@@ -363,7 +358,6 @@ class ESCDFActivity:
                 )
             self._metadata_links = [value for value in metadata_links]
 
-        self._backing_state = "memory"
         self._hdf5_location = None
         self._has_pending_changes = False
         self._logical_parent_ref = None
@@ -680,7 +674,6 @@ class ESCDFActivity:
             )
 
         self._hdf5_location = HDF5Location.from_h5_object(activity_group)
-        self._backing_state = "hdf5_native"
         self._has_pending_changes = False
 
     def write_to_disk(self, activity_groups):

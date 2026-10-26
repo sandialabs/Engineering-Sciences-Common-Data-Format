@@ -43,7 +43,6 @@ classdef escdf_dataset < handle & dynamicprops
         descriptive_name;
         has_modified_properties;
         has_pending_changes;
-        backing_state;
         version;
         logical_parent;
         hdf5_location;
@@ -84,7 +83,6 @@ classdef escdf_dataset < handle & dynamicprops
             end
             obj.has_modified_properties = false;
             obj.has_pending_changes = false;
-            obj.backing_state = 'memory';
             obj.hdf5_location = [];
             obj.name = name;
             obj.dataset_type = dataset_type;
@@ -204,26 +202,6 @@ classdef escdf_dataset < handle & dynamicprops
         %     True if the dataset has pending changes relative to its
         %     current authoritative/reference state.
             out = obj.has_pending_changes;
-        end
-
-        function out = get_backing_state(obj)
-        % Return the dataset backing state.
-        %
-        % Returns
-        % -------
-        % out : char
-        %     Dataset backing state.
-            out = obj.backing_state;
-        end
-
-        function set_backing_state(obj, state)
-        % Set the dataset backing state.
-        %
-        % Parameters
-        % ----------
-        % state : char
-        %     Dataset backing state string.
-            obj.backing_state = state;
         end
 
         function set_has_pending_changes(obj, tf)
@@ -567,7 +545,6 @@ classdef escdf_dataset < handle & dynamicprops
                 end
             end
             obj.hdf5_location = [];
-            obj.backing_state = 'memory';
         end
 
         function realize_to_hdf5(obj,hdf5_group_id,strategy,overwrite)
@@ -629,7 +606,6 @@ classdef escdf_dataset < handle & dynamicprops
             H5S.close(attr_space_id);
 
             obj.hdf5_location = HDF5Location.from_hdf5_id(hdf5_group_id);
-            obj.backing_state = 'hdf5_native';
             obj.has_pending_changes = false;
         end
 
@@ -1537,7 +1513,6 @@ classdef escdf_dataset < handle & dynamicprops
                 obj.(extra_dataset) = prop;
             end
             obj.hdf5_location = HDF5Location.from_hdf5_id(group_id);
-            obj.backing_state = 'hdf5_native';
             obj.has_pending_changes = false;
         end
 

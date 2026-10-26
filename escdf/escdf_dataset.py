@@ -243,10 +243,6 @@ class ESCDFDataset:
         return self._has_pending_changes
 
     @property
-    def backing_state(self):
-        return self._backing_state
-
-    @property
     def logical_parent(self):
         """
         Return the logical parent for this dataset.
@@ -478,7 +474,6 @@ class ESCDFDataset:
         self._has_modified_properties = False
         self._modified_properties = set()
         self._has_pending_changes = False
-        self._backing_state = "memory"
         self._hdf5_location = None
         self._logical_parent_ref = None
 
@@ -501,13 +496,11 @@ class ESCDFDataset:
             "_descriptive_name",
             "_has_modified_properties",
             "_has_pending_changes",
-            "_backing_state",
             "name",
             "dataset_type",
             "descriptive_name",
             "has_modified_properties",
             "has_pending_changes",
-            "backing_state",
             "_modified_properties",
             "property_names",
             "_version",
@@ -1021,7 +1014,6 @@ class ESCDFDataset:
             setattr(self, extra_dataset, h5_dataset)
 
         self._hdf5_location = HDF5Location.from_h5_object(h5_group)
-        self._backing_state = "hdf5_native"
         self._has_pending_changes = False
         return self
 
@@ -1061,7 +1053,6 @@ class ESCDFDataset:
         h5_group.attrs["_version"] = self._version
 
         self._hdf5_location = HDF5Location.from_h5_object(h5_group)
-        self._backing_state = "hdf5_native"
         self._has_pending_changes = False
 
     def write_to_disk(self, h5_group):
@@ -1094,7 +1085,6 @@ class ESCDFDataset:
             if property_ is not None:
                 property_.read_into_memory()
         self._hdf5_location = None
-        self._backing_state = "memory"
 
     def set_attachments(self, filenames):
         """

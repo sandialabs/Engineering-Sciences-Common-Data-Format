@@ -238,7 +238,7 @@ classdef escdf_ops_test < matlab.unittest.TestCase
 
             testCase.verifyEqual(f.get_lifecycle_state(), 'draft');
             testCase.verifyEqual(f.get_mutability_state(), 'editable');
-            testCase.verifyEqual(f.get_backing_state(), 'memory');
+            testCase.verifyEmpty(f.get_hdf5_location());
             testCase.verifyFalse(f.get_has_pending_changes());
 
             testCase.verifyClass(f.get_created_date(), 'datetime');
@@ -263,11 +263,11 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             f.add_metadata(md);
 
             testCase.verifyTrue(f.get_has_pending_changes());
-            testCase.verifyEqual(f.get_backing_state(), 'memory');
+            testCase.verifyEmpty(f.get_hdf5_location());
 
             f.write_to_disk(outfile, true);
 
-            testCase.verifyEqual(f.get_backing_state(), 'hdf5_native');
+            testCase.verifyNotEmpty(f.get_hdf5_location());
             testCase.verifyFalse(f.get_has_pending_changes());
         end
 
@@ -281,7 +281,7 @@ classdef escdf_ops_test < matlab.unittest.TestCase
 
             loaded = escdf.load(outfile, true);
 
-            testCase.verifyEqual(loaded.get_backing_state(), 'hdf5_native');
+            testCase.verifyNotEmpty(loaded.get_hdf5_location());
             testCase.verifyEqual(loaded.get_lifecycle_state(), 'draft');
             testCase.verifyEqual(loaded.get_mutability_state(), 'read_only');
             testCase.verifyFalse(loaded.get_has_pending_changes());
@@ -297,7 +297,7 @@ classdef escdf_ops_test < matlab.unittest.TestCase
 
             loaded = escdf.load(outfile, false);
 
-            testCase.verifyEqual(loaded.get_backing_state(), 'hdf5_native');
+            testCase.verifyNotEmpty(loaded.get_hdf5_location());
             testCase.verifyEqual(loaded.get_lifecycle_state(), 'draft');
             testCase.verifyEqual(loaded.get_mutability_state(), 'editable');
             testCase.verifyFalse(loaded.get_has_pending_changes());
@@ -330,10 +330,10 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             testCase.verifyFalse(attached_md == source_md);
 
             % In-memory properties should remain memory-backed in the clone.
-            testCase.verifyEqual(attached_md.test_name.get_backing_state(), 'memory');
-            testCase.verifyEqual(attached_md.program.get_backing_state(), 'memory');
-            testCase.verifyEqual(attached_md.hardware_list.get_backing_state(), 'memory');
-            testCase.verifyEqual(attached_md.point_of_contact.get_backing_state(), 'memory');
+            testCase.verifyEmpty(attached_md.test_name.get_hdf5_location());
+            testCase.verifyEmpty(attached_md.program.get_hdf5_location());
+            testCase.verifyEmpty(attached_md.hardware_list.get_hdf5_location());
+            testCase.verifyEmpty(attached_md.point_of_contact.get_hdf5_location());
 
             % Values should match.
             testCase.verifyEqual(attached_md.test_name(:), {'Original Test Name'});
@@ -354,7 +354,7 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             loaded_md = loaded.get_metadata('meta1');
 
             % Loaded source should be native HDF5-backed.
-            testCase.verifyEqual(loaded_md.test_name.get_backing_state(), 'hdf5_native');
+            testCase.verifyNotEmpty(loaded_md.test_name.get_hdf5_location());
 
             target = escdf();
             target.add_metadata(loaded_md);
@@ -399,11 +399,11 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             % Mutating should materialize to memory for the clone.
             attached_md.test_name = {'Modified In Clone'};
 
-            testCase.verifyEqual(attached_md.test_name.get_backing_state(), 'memory');
+            testCase.verifyEmpty(attached_md.test_name.get_hdf5_location());
             testCase.verifyEqual(attached_md.test_name(:), {'Modified In Clone'});
 
             % Original loaded dataset should remain unchanged and still native-backed.
-            testCase.verifyEqual(loaded_md.test_name.get_backing_state(), 'hdf5_native');
+            testCase.verifyNotEmpty(loaded_md.test_name.get_hdf5_location());
             testCase.verifyEqual(loaded_md.test_name(:), {'test program name'});
         end
 
@@ -427,8 +427,8 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             testCase.verifyFalse(attached_data == source_data);
 
             % In-memory properties remain memory-backed.
-            testCase.verifyEqual(attached_data.value.get_backing_state(), 'memory');
-            testCase.verifyEqual(attached_data.unit.get_backing_state(), 'memory');
+            testCase.verifyEmpty(attached_data.value.get_hdf5_location());
+            testCase.verifyEmpty(attached_data.unit.get_hdf5_location());
 
             testCase.verifyEqual(attached_data.value(:), 9.81);
             testCase.verifyEqual(attached_data.unit(:), {'m/s^2'});
@@ -455,7 +455,7 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             loaded_data = loaded.get_activity_data('act1', 'data1');
 
             % Loaded source should be native HDF5-backed.
-            testCase.verifyEqual(loaded_data.value.get_backing_state(), 'hdf5_native');
+            testCase.verifyNotEmpty(loaded_data.value.get_hdf5_location());
 
             target = escdf();
             target.add_activity('act2', 'Activity two', when);
@@ -481,7 +481,7 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
             activity = escdf_activity('act1', 'Activity one', when);
 
-            testCase.verifyEqual(activity.get_backing_state(), 'memory');
+            testCase.verifyEmpty(activity.get_hdf5_location());
             testCase.verifyFalse(activity.get_has_pending_changes());
         end
 
@@ -521,7 +521,7 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             loaded = escdf.load(outfile);
             loaded_activity = loaded.get_activity('act1');
 
-            testCase.verifyEqual(loaded_activity.get_backing_state(), 'hdf5_native');
+            testCase.verifyNotEmpty(loaded_activity.get_hdf5_location());
             testCase.verifyFalse(loaded_activity.get_has_pending_changes());
         end
 
@@ -537,12 +537,12 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             data = escdf_ops_test.make_minimal_data('data1');
             activity.add_data(data);
 
-            testCase.verifyEqual(activity.get_backing_state(), 'memory');
+            testCase.verifyEmpty(activity.get_hdf5_location());
             testCase.verifyTrue(activity.get_has_pending_changes());
 
             activity.write_to_disk(activity_group);
 
-            testCase.verifyEqual(activity.get_backing_state(), 'hdf5_native');
+            testCase.verifyNotEmpty(activity.get_hdf5_location());
             testCase.verifyFalse(activity.get_has_pending_changes());
 
             H5G.close(activity_group);
@@ -946,7 +946,7 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             testCase.verifyTrue(H5L.exists(data_group, 'unit', 'H5P_DEFAULT') ~= 0);
             H5G.close(data_group);
 
-            testCase.verifyEqual(activity.get_backing_state(), 'hdf5_native');
+            testCase.verifyNotEmpty(activity.get_hdf5_location());
             testCase.verifyFalse(activity.get_has_pending_changes());
 
             H5G.close(act_group);
@@ -984,7 +984,7 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             H5G.close(agid);
             H5F.close(file_id);
 
-            testCase.verifyEqual(f.get_backing_state(), 'hdf5_native');
+            testCase.verifyNotEmpty(f.get_hdf5_location());
             testCase.verifyFalse(f.get_has_pending_changes());
         end
 

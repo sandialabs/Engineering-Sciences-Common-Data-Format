@@ -68,7 +68,6 @@ class ESCDF:
     __slots__ = (
         "__weakref__",
         "_activities",
-        "_backing_state",
         "_created_by",
         "_created_date",
         "_has_pending_changes",
@@ -101,10 +100,6 @@ class ESCDF:
     @property
     def mutability_state(self):
         return self._mutability_state
-
-    @property
-    def backing_state(self):
-        return self._backing_state
 
     @property
     def has_pending_changes(self):
@@ -222,7 +217,6 @@ class ESCDF:
 
         self._lifecycle_state = "draft"
         self._mutability_state = "editable"
-        self._backing_state = "memory"
         self._hdf5_location = None
         self._has_pending_changes = False
 
@@ -922,7 +916,6 @@ class ESCDF:
         )
         cloned._modified_properties.update(dataset._modified_properties)
 
-        cloned._backing_state = "memory"
         cloned._has_pending_changes = False
         return cloned
 
@@ -1062,7 +1055,6 @@ class ESCDF:
                 # realize_to_hdf5.
                 activity.write_to_disk(activity_group)
 
-        self._backing_state = "hdf5_native"
         self._has_pending_changes = False
         self._hdf5_location = HDF5Location.from_h5_object(h5_file)
         h5_file.flush()
@@ -1236,10 +1228,8 @@ class ESCDF:
                 loaded_activity._hdf5_location = HDF5Location.from_h5_object(
                     activity_group
                 )
-                loaded_activity._backing_state = "hdf5_native"
                 loaded_activity._has_pending_changes = False
 
-        escdf_file._backing_state = "hdf5_native"
         escdf_file._lifecycle_state = "draft"
         escdf_file._mutability_state = "read_only" if readonly else "editable"
         escdf_file._has_pending_changes = False

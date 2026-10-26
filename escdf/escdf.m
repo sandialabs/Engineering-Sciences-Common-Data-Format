@@ -37,7 +37,6 @@ classdef escdf < handle
         created_date
         lifecycle_state
         mutability_state
-        backing_state
         has_pending_changes
         hdf5_location
     end
@@ -63,7 +62,6 @@ classdef escdf < handle
 
             obj.lifecycle_state = 'draft';
             obj.mutability_state = 'editable';
-            obj.backing_state = 'memory';
             obj.has_pending_changes = false;
             obj.hdf5_location = [];
         end
@@ -96,11 +94,6 @@ classdef escdf < handle
         function out = get_mutability_state(obj)
         % Return the container mutability state.
             out = obj.mutability_state;
-        end
-
-        function out = get_backing_state(obj)
-        % Return the container backing state.
-            out = obj.backing_state;
         end
 
         function out = get_has_pending_changes(obj)
@@ -961,7 +954,6 @@ classdef escdf < handle
                 cloned.has_modified_properties = true;
             end
 
-            cloned.set_backing_state('memory');
             cloned.set_has_pending_changes(false);
         end
 
@@ -1125,7 +1117,6 @@ classdef escdf < handle
 
             H5G.close(agid);
 
-            obj.backing_state = 'hdf5_native';
             obj.has_pending_changes = false;
             obj.hdf5_location = HDF5Location.from_hdf5_id(file_id);
         end
@@ -1396,10 +1387,8 @@ classdef escdf < handle
 
                 loaded_activity = escdf_file.get_activity(valid_activity_name);
                 loaded_activity.set_hdf5_location(HDF5Location(hdf5_path, ['/activities/', activity_name]));
-                loaded_activity.set_backing_state('hdf5_native');
                 loaded_activity.set_has_pending_changes(false);
             end
-            escdf_file.backing_state = 'hdf5_native';
             escdf_file.lifecycle_state = 'draft';
             if readonly
                 escdf_file.mutability_state = 'read_only';

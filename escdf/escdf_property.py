@@ -63,7 +63,6 @@ class ESCDFProperty:
         "_data",
         "_ragged",
         "_h5_dataset",
-        "_backing_state",
         "_logical_parent_ref",
     )
 
@@ -90,10 +89,6 @@ class ESCDFProperty:
     @property
     def in_memory(self):
         return self.h5_dataset is None
-
-    @property
-    def backing_state(self):
-        return self._backing_state
 
     @property
     def logical_parent(self):
@@ -271,7 +266,6 @@ class ESCDFProperty:
         self._datatype = datatype
         self._shape = tuple(shape)
         self._ragged = ragged
-        self._backing_state = "memory"
         self._logical_parent_ref = None
 
         # Make sure we don't have inconsistent data
@@ -287,7 +281,6 @@ class ESCDFProperty:
         if hdf5dataset is not None:
             self._h5_dataset = hdf5dataset
             self._data = None
-            self._backing_state = "hdf5_native"
             if VERBOSE:
                 print("Linked Dataset to disk: {:}".format(name))
         elif hdf5group is not None:
@@ -301,13 +294,11 @@ class ESCDFProperty:
                 dtype = datatype
             self._h5_dataset = hdf5group.create_dataset(name, shape, dtype)
             self.h5_dataset.attrs["data_type"] = datatype
-            self._backing_state = "hdf5_native"
             if VERBOSE:
                 print("Dataset Created on disk: {:}".format(name))
             self._data = None
         else:
             self._h5_dataset = None
-            self._backing_state = "memory"
             if self.datatype == "bytes" or self.ragged:
                 self._data = RaggedArray(
                     self.shape, "uint8" if self.datatype == "bytes" else self.datatype
@@ -566,7 +557,6 @@ class ESCDFProperty:
                 self._h5_dataset[...] = self._data[...]
 
             self._data = None
-            self._backing_state = "hdf5_native"
             return
 
         raise RuntimeError(f"Property {self.name} could not be realized to disk.")
@@ -624,8 +614,7 @@ class ESCDFProperty:
         self._data[...] = self[...]
         self._h5_dataset = None
         if VERBOSE:
-            print("Dataset Created in Memory: {:}".format(self.name))
-        self._backing_state = "memory"
+            print(f"Dataset Created in Memory: {self.name}")
 
     def repr(self):
         """
@@ -637,9 +626,8 @@ class ESCDFProperty:
             Human-readable summary including storage mode, name, datatype,
             and shape.
         """
-        return "ESCDF Property ({:}, {:}): {:}, {:}, {:}".format(
+        return "ESCDF Property ({:}): {:}, {:}, {:}".format(
             "in memory" if self.in_memory else "on disk",
-            self.backing_state,
             self.name,
             self.datatype,
             self.shape,

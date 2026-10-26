@@ -377,13 +377,13 @@ classdef property_test < matlab.unittest.TestCase
 
         function test_new_in_memory_property_starts_memory_backed(testCase)
             prop = escdf_property('p1', 'f8', [3]);
-            testCase.verifyEqual(prop.get_backing_state(), 'memory');
+            testCase.verifyEmpty(prop.get_hdf5_location());
             testCase.verifyTrue(prop.isinmemory());
         end
 
         function test_new_hdf5_property_starts_hdf5_native(testCase)
             prop = escdf_property('p1', 'f8', [3], 'hdf5groupid', testCase.file_id);
-            testCase.verifyEqual(prop.get_backing_state(), 'hdf5_native');
+            testCase.verifyNotEmpty(prop.get_hdf5_location());
             testCase.verifyFalse(prop.isinmemory());
         end
 
@@ -400,7 +400,7 @@ classdef property_test < matlab.unittest.TestCase
             prop(:) = [1.0; 2.0; 3.0];
 
             loaded = escdf_property.load(prop.get_h5d_id());
-            testCase.verifyEqual(loaded.get_backing_state(), 'hdf5_native');
+            testCase.verifyNotEmpty(loaded.get_hdf5_location());
             testCase.verifyFalse(loaded.isinmemory());
         end
 
@@ -410,7 +410,7 @@ classdef property_test < matlab.unittest.TestCase
 
             prop.read_into_memory();
 
-            testCase.verifyEqual(prop.get_backing_state(), 'memory');
+            testCase.verifyEmpty(prop.get_hdf5_location());
             testCase.verifyTrue(prop.isinmemory());
             testCase.verifyEqual(prop(:), [1.0; 2.0; 3.0]);
         end

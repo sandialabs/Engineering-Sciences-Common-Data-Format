@@ -535,7 +535,7 @@ def test_new_dataset_starts_in_expected_state(hdf5_and_properties):
 
     ds = escdf.Dataset("d1", "unittesting_specification")
 
-    assert ds.backing_state == "memory"
+    assert ds.hdf5_location is None
     assert ds.has_pending_changes is False
     assert ds.has_modified_properties is False
 
@@ -553,7 +553,7 @@ def test_dataset_assignment_sets_pending_changes(hdf5_and_properties):
     ds.vec = np.array([1.0, 2.0, 3.0], dtype=np.float64)
 
     assert ds.has_pending_changes is True
-    assert ds.backing_state == "memory"
+    assert ds.hdf5_location is None
 
 
 def test_loaded_dataset_starts_hdf5_native_with_no_pending_changes(
@@ -583,7 +583,7 @@ def test_loaded_dataset_starts_hdf5_native_with_no_pending_changes(
     loaded = escdf.ESCDF.load(str(file_path))
     loaded_md = loaded.metadata["meta1"]
 
-    assert loaded_md.backing_state == "hdf5_native"
+    assert loaded_md.hdf5_location is not None
     assert loaded_md.has_pending_changes is False
     assert loaded_md.has_modified_properties is False
 
@@ -609,12 +609,12 @@ def test_dataset_write_to_disk_sets_hdf5_native_and_clears_pending_changes(
     ds.unit = "g"
 
     assert ds.has_pending_changes is True
-    assert ds.backing_state == "memory"
+    assert ds.hdf5_location is None
 
     group = h5_file.create_group("meta1")
     ds.write_to_disk(group)
 
-    assert ds.backing_state == "hdf5_native"
+    assert ds.hdf5_location is not None
     assert ds.has_pending_changes is False
 
     h5_file.close()
@@ -643,13 +643,13 @@ def test_dataset_read_into_memory_sets_memory_backing_state(tmp_path, monkeypatc
     loaded = escdf.ESCDF.load(str(file_path))
     loaded_md = loaded.metadata["meta1"]
 
-    assert loaded_md.backing_state == "hdf5_native"
+    assert loaded_md.hdf5_location is not None
 
     loaded_md.read_into_memory()
 
-    assert loaded_md.backing_state == "memory"
-    assert loaded_md.value.backing_state == "memory"
-    assert loaded_md.unit.backing_state == "memory"
+    assert loaded_md.hdf5_location is None
+    assert loaded_md.value.hdf5_location is None
+    assert loaded_md.unit.hdf5_location is None
 
 
 def test_attached_cloned_dataset_starts_memory_backed_and_not_pending_changes(
@@ -682,7 +682,7 @@ def test_attached_cloned_dataset_starts_memory_backed_and_not_pending_changes(
 
     attached_md = target.metadata["meta1"]
 
-    assert attached_md.backing_state == "memory"
+    assert attached_md.hdf5_location is None
     assert attached_md.has_pending_changes is False
 
 
@@ -709,7 +709,7 @@ def test_dataset_realize_to_hdf5_writes_properties_and_attributes(tmp_path):
             else group["unit"][()] == "g"
         )
 
-    assert ds.backing_state == "hdf5_native"
+    assert ds.hdf5_location is not None
     assert ds.has_pending_changes is False
 
 

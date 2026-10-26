@@ -43,7 +43,6 @@ classdef escdf_property < handle
         ragged
         h5d_id
         h5type_id
-        backing_state
         logical_parent
     end
 
@@ -77,7 +76,6 @@ classdef escdf_property < handle
             obj.size = size;
             obj.inmemory = true;
             obj.ragged = false;
-            obj.backing_state = 'memory';
             obj.logical_parent = [];
             data = missing;
             h5g_id = missing;
@@ -118,7 +116,6 @@ classdef escdf_property < handle
                 H5A.close(attr_id);
                 H5T.close(str_type_id);
                 H5S.close(attr_space_id);
-                obj.backing_state = 'hdf5_native';
             end
 
             if obj.inmemory
@@ -661,8 +658,6 @@ classdef escdf_property < handle
                 H5A.close(attr_id);
                 H5T.close(str_type_id);
                 H5S.close(attr_space_id);
-
-                obj.backing_state = 'hdf5_native';
                 return
             end
 
@@ -717,7 +712,6 @@ classdef escdf_property < handle
                     obj.data = fn_handle(zeros(size));
                 end
                 obj.subsasgn(S,data);
-                obj.backing_state = 'memory';
             end
         end
 
@@ -831,16 +825,6 @@ classdef escdf_property < handle
             else
                 data = obj(:);
             end
-        end
-
-        function out = get_backing_state(obj)
-        % Return the property's backing state.
-        %
-        % Returns
-        % -------
-        % out : char
-        %     Property backing state.
-            out = obj.backing_state;
         end
 
         function obj = set_h5type(obj,escdf_type)
@@ -1115,7 +1099,6 @@ classdef escdf_property < handle
             obj = escdf_property(name,data_type,dims,'ragged',ragged);
             obj.inmemory = false;
             obj.h5d_id = dataset_id;
-            obj.backing_state = 'hdf5_native';
         end
     end
 end
