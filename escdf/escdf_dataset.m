@@ -406,6 +406,70 @@ classdef escdf_dataset < handle & dynamicprops
             tf = current.same_location_as(target);
         end
 
+        function tf = needs_realization(obj, parent_group_id)
+        % Return whether this dataset needs realization under a target parent group.
+        %
+        % Parameters
+        % ----------
+        % parent_group_id : numeric
+        %     Parent HDF5 group or file identifier under which this dataset
+        %     should be realized.
+        %
+        % Returns
+        % -------
+        % tf : logical
+        %     True if the dataset or any present property is not already
+        %     realized at the expected target location.
+            tf = true;
+
+            if H5L.exists(parent_group_id, obj.get_name(), 'H5P_DEFAULT') == 0
+                return
+            end
+
+            target_group_id = H5G.open(parent_group_id, obj.get_name());
+            cleanup = onCleanup(@() H5G.close(target_group_id));
+
+            if ~obj.is_realized_at(target_group_id)
+                return
+            end
+
+            property_list = properties(obj);
+            present_property_names = {};
+
+            for i = 1:length(property_list)
+                property_name = property_list{i};
+
+                if startsWith(property_name, 'DO_NOT_USE_')
+                    continue
+                end
+
+                property = obj.(property_name);
+
+                if ~isa(property, 'escdf_property')
+                    continue
+                end
+
+                present_property_names{end+1} = property_name; %#ok<AGROW>
+
+                if H5L.exists(target_group_id, property_name, 'H5P_DEFAULT') == 0
+                    return
+                end
+
+                if ~property.is_realized_at(target_group_id)
+                    return
+                end
+            end
+
+            target_info = h5info(obj.get_hdf5_location().file_path, obj.get_hdf5_location().object_path);
+            target_property_names = {target_info.Datasets.Name};
+
+            if ~isequal(sort(present_property_names), sort(target_property_names))
+                return
+            end
+
+            tf = false;
+        end
+
         function tf = same_backing_location_as(obj, other)
         % Return whether this dataset has the same HDF5 backing location
         % as another dataset.

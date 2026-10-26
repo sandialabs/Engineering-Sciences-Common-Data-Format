@@ -394,6 +394,72 @@ class ESCDFDataset:
             self.target_hdf5_location(parent_group)
         )
 
+    def needs_realization(self, parent_group):
+        """
+        Return whether this dataset needs realization under a target parent group.
+
+        Parameters
+        ----------
+        parent_group : h5py.Group or h5py.File
+            Parent HDF5 group or file under which this dataset should be
+            realized.
+
+        Returns
+        -------
+        bool
+            ``True`` if the dataset or any present property is not already
+            realized at the expected target location.
+
+        Notes
+        -----
+        This method derives realization need from the current logical object
+        state and HDF5 backing locations. It does not rely on a manually
+        maintained backing-state flag.
+        """
+        if self.name not in parent_group:
+            return True
+
+        target_group = parent_group[self.name]
+
+        if not self.is_realized_at(target_group):
+            return True
+
+        # First-pass attribute checks. These are part of the dataset group
+        # realization, not property realization.
+        if target_group.attrs.get("_specification_name", None) != self.dataset_type:
+            return True
+
+        if target_group.attrs.get("_descriptive_name", None) != self.descriptive_name:
+            return True
+
+        target_version = target_group.attrs.get("_version", None)
+        if target_version is None or tuple(target_version) != tuple(self._version):
+            return True
+
+        present_property_names = set()
+
+        for property_name in self._valid_properties:
+            property_ = getattr(self, property_name, None)
+            if property_ is None:
+                continue
+
+            present_property_names.add(property_name)
+
+            if property_name not in target_group:
+                return True
+
+            if not property_.is_realized_at(target_group):
+                return True
+
+        # First-pass full-rewrite semantics: target properties not present in
+        # the logical graph indicate the target is not synchronized with the
+        # current dataset.
+        target_property_names = set(target_group.keys())
+        if target_property_names != present_property_names:
+            return True
+
+        return False
+
     def same_backing_location_as(self, other):
         """
         Return whether this dataset has the same HDF5 backing location as

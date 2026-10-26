@@ -745,6 +745,74 @@ classdef dataset_test < matlab.unittest.TestCase
             H5G.close(group_id);
         end
 
+        function test_memory_dataset_needs_realization(testCase)
+            outfile = fullfile(testCase.temp_folder, 'memory_dataset_needs_realization.h5');
+            file_id = H5F.create(outfile, 'H5F_ACC_TRUNC', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+            ds = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
+            ds.value = 2.0;
+            ds.unit = {'g'};
+
+            testCase.verifyTrue(ds.needs_realization(file_id));
+
+            H5F.close(file_id);
+        end
+
+        function test_loaded_dataset_does_not_need_realization_under_same_target(testCase)
+            outfile = fullfile(testCase.temp_folder, 'loaded_dataset_no_realization_needed.h5');
+
+            f = escdf();
+            md = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
+            md.value = 2.0;
+            md.unit = {'g'};
+            f.add_metadata(md);
+            f.write_to_disk(outfile, true);
+
+            loaded = escdf.load(outfile);
+            loaded_md = loaded.get_metadata('meta1');
+
+            file_id = H5F.open(outfile, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
+            testCase.verifyFalse(loaded_md.needs_realization(file_id));
+            H5F.close(file_id);
+        end
+
+        function test_dataset_needs_realization_under_different_target(testCase)
+            source_path = fullfile(testCase.temp_folder, 'source_dataset_target.h5');
+            target_path = fullfile(testCase.temp_folder, 'target_dataset_target.h5');
+
+            f = escdf();
+            md = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
+            md.value = 2.0;
+            md.unit = {'g'};
+            f.add_metadata(md);
+            f.write_to_disk(source_path, true);
+
+            loaded = escdf.load(source_path);
+            loaded_md = loaded.get_metadata('meta1');
+
+            target_id = H5F.create(target_path, 'H5F_ACC_TRUNC', 'H5P_DEFAULT', 'H5P_DEFAULT');
+            testCase.verifyTrue(loaded_md.needs_realization(target_id));
+            H5F.close(target_id);
+        end
+
+        function test_dataset_needs_realization_after_logical_rename(testCase)
+            outfile = fullfile(testCase.temp_folder, 'dataset_rename_needs_realization.h5');
+
+            f = escdf();
+            md = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
+            md.value = 2.0;
+            md.unit = {'g'};
+            f.add_metadata(md);
+            f.write_to_disk(outfile, true);
+
+            loaded = escdf.load(outfile);
+            renamed = loaded.rename_metadata('meta1', 'meta2');
+
+            file_id = H5F.open(outfile, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
+            testCase.verifyTrue(renamed.needs_realization(file_id));
+            H5F.close(file_id);
+        end
+
     end
 
 end

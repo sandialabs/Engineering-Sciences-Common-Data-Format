@@ -795,3 +795,86 @@ def test_dataset_is_realized_at_true_after_realization(tmp_path):
 
         assert ds.is_realized_at(group)
         assert ds.is_realized_under(h5_file)
+
+
+def test_memory_dataset_needs_realization(tmp_path):
+    file_path = tmp_path / "memory_dataset_needs_realization.h5"
+
+    ds = escdf.Dataset("meta1", "scalar", "Scalar metadata")
+    ds.value = 2.0
+    ds.unit = "g"
+
+    with h5py.File(file_path, "w") as h5_file:
+        assert ds.needs_realization(h5_file)
+
+
+def test_loaded_dataset_does_not_need_realization_under_same_target(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "loaded_dataset_no_realization_needed.h5"
+
+    f = escdf.ESCDF()
+    md = escdf.Dataset("meta1", "scalar", "Scalar metadata")
+    md.value = 2.0
+    md.unit = "g"
+    f.add_metadata(md)
+    f.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path))
+    loaded_md = loaded.metadata["meta1"]
+
+    with h5py.File(file_path, "r") as h5_file:
+        assert not loaded_md.needs_realization(h5_file)
+
+
+def test_dataset_needs_realization_under_different_target(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    source_path = tmp_path / "source_dataset_target.h5"
+    target_path = tmp_path / "target_dataset_target.h5"
+
+    f = escdf.ESCDF()
+    md = escdf.Dataset("meta1", "scalar", "Scalar metadata")
+    md.value = 2.0
+    md.unit = "g"
+    f.add_metadata(md)
+    f.write_to_disk(str(source_path))
+
+    loaded = escdf.ESCDF.load(str(source_path))
+    loaded_md = loaded.metadata["meta1"]
+
+    with h5py.File(target_path, "w") as target_file:
+        assert loaded_md.needs_realization(target_file)
+
+
+def test_dataset_needs_realization_after_logical_rename(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    file_path = tmp_path / "dataset_rename_needs_realization.h5"
+
+    f = escdf.ESCDF()
+    md = escdf.Dataset("meta1", "scalar", "Scalar metadata")
+    md.value = 2.0
+    md.unit = "g"
+    f.add_metadata(md)
+    f.write_to_disk(str(file_path))
+
+    loaded = escdf.ESCDF.load(str(file_path))
+    renamed = loaded.rename_metadata("meta1", "meta2")
+
+    with h5py.File(file_path, "r") as h5_file:
+        assert renamed.needs_realization(h5_file)
