@@ -721,20 +721,6 @@ classdef escdf_property < handle
             end
         end
 
-        function mark_external_backing(obj)
-        % Deprecated transitional method.
-        %
-        % Mark the property as externally backed.
-        %
-        % Notes
-        % -----
-        % This is intended for copied/attached property wrappers that still
-        % reference an HDF5 source outside their new native context.
-            if strcmp(obj.backing_state, 'hdf5_native')
-                obj.backing_state = 'hdf5_external';
-            end
-        end
-
         function delete(obj)
             if ~obj.inmemory% && ~ismissing(obj.h5d_id)
                 H5D.close(obj.h5d_id)

@@ -627,23 +627,6 @@ class ESCDFProperty:
             print("Dataset Created in Memory: {:}".format(self.name))
         self._backing_state = "memory"
 
-    def mark_external_backing(self):
-        """
-        Deprecated transitional method.
-
-        Notes
-        -----
-        External/native status should be derived from backing location and
-        target location rather than stored on the property.
-        """
-        warnings.warn(
-            "mark_external_backing is deprecated; external/native status is now derived from backing location.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if self._backing_state == "hdf5_native":
-            self._backing_state = "hdf5_external"
-
     def repr(self):
         """
         Return a text representation of the property.

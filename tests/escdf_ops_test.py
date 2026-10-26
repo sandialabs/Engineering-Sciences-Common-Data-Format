@@ -385,7 +385,9 @@ def test_add_metadata_clones_in_memory_dataset_wrapper(monkeypatch):
     assert attached_md.program[...] == "program abc"
 
 
-def test_add_metadata_clones_hdf5_native_properties_as_external(tmp_path, monkeypatch):
+def test_add_metadata_clones_hdf5_properties_with_same_backing_location(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(
         escdf.ESCDF,
         "get_or_prompt_attribution_name",
@@ -402,31 +404,32 @@ def test_add_metadata_clones_hdf5_native_properties_as_external(tmp_path, monkey
     loaded = escdf.ESCDF.load(str(file_path), readonly=True)
     loaded_md = loaded.metadata["meta1"]
 
-    # Loaded source should be native HDF5-backed.
-    assert loaded_md.test_name.backing_state == "hdf5_native"
-
     target = escdf.ESCDF()
     target.add_metadata(loaded_md)
 
     attached_md = target.metadata["meta1"]
 
-    # New wrapper object
     assert attached_md is not loaded_md
 
-    # Copied attached properties should now be externally backed.
+    assert attached_md.test_name is not loaded_md.test_name
     assert attached_md.test_name.same_backing_location_as(loaded_md.test_name)
+
+    assert attached_md.program is not loaded_md.program
     assert attached_md.program.same_backing_location_as(loaded_md.program)
+
+    assert attached_md.hardware_list is not loaded_md.hardware_list
     assert attached_md.hardware_list.same_backing_location_as(loaded_md.hardware_list)
+
+    assert attached_md.point_of_contact is not loaded_md.point_of_contact
     assert attached_md.point_of_contact.same_backing_location_as(
         loaded_md.point_of_contact
     )
 
-    # Values should still read correctly.
     assert attached_md.test_name[...] == "test program name"
     assert attached_md.program[...] == "program abc"
 
 
-def test_mutating_external_backed_attached_metadata_materializes_clone_only(
+def test_mutating_attached_hdf5_backed_metadata_materializes_clone_only(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(
@@ -435,32 +438,37 @@ def test_mutating_external_backed_attached_metadata_materializes_clone_only(
         staticmethod(lambda **kwargs: "unit_test_user"),
     )
 
-    file_path = tmp_path / "source_metadata_for_mutation.h5"
+    source_path = tmp_path / "source_metadata_for_mutation.h5"
 
     source_file = escdf.ESCDF()
     source_md = make_minimal_metadata("meta1")
     source_file.add_metadata(source_md)
-    source_file.write_to_disk(str(file_path))
+    source_file.write_to_disk(str(source_path))
 
-    loaded = escdf.ESCDF.load(str(file_path), readonly=True)
+    loaded = escdf.ESCDF.load(str(source_path), readonly=False)
     loaded_md = loaded.metadata["meta1"]
 
     target = escdf.ESCDF()
     target.add_metadata(loaded_md)
     attached_md = target.metadata["meta1"]
 
-    # Initially external-backed in the attached clone.
     assert attached_md.test_name.same_backing_location_as(loaded_md.test_name)
+    assert not attached_md.test_name.can_write_through_current_hdf5_backing()
 
-    # Mutating should materialize to memory for the clone.
     attached_md.test_name = "Modified In Clone"
 
-    assert attached_md.test_name.backing_state == "memory"
+    assert attached_md.test_name.in_memory
+    assert attached_md.test_name.hdf5_location is None
     assert attached_md.test_name[...] == "Modified In Clone"
 
-    # Original loaded dataset should remain unchanged and still native-backed.
-    assert loaded_md.test_name.backing_state == "hdf5_native"
+    assert not loaded_md.test_name.in_memory
     assert loaded_md.test_name[...] == "test program name"
+
+    with h5py.File(source_path, "r") as h5_file:
+        assert h5_file["meta1"]["test_name"][()] in (
+            b"test program name",
+            "test program name",
+        )
 
 
 def test_add_data_to_activity_clones_dataset_wrapper(monkeypatch):
