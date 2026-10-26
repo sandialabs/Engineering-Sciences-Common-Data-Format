@@ -361,11 +361,14 @@ classdef escdf_ops_test < matlab.unittest.TestCase
 
             attached_md = target.get_metadata('meta1');
 
+            % New wrapper object
+            testCase.verifyFalse(attached_md == loaded_md)
+
             % Copied attached properties should now be externally backed.
-            testCase.verifyEqual(attached_md.test_name.get_backing_state(), 'hdf5_external');
-            testCase.verifyEqual(attached_md.program.get_backing_state(), 'hdf5_external');
-            testCase.verifyEqual(attached_md.hardware_list.get_backing_state(), 'hdf5_external');
-            testCase.verifyEqual(attached_md.point_of_contact.get_backing_state(), 'hdf5_external');
+            testCase.verifyTrue(attached_md.test_name.same_backing_location_as(loaded_md.test_name));
+            testCase.verifyTrue(attached_md.program.same_backing_location_as(loaded_md.program));
+            testCase.verifyTrue(attached_md.hardware_list.same_backing_location_as(loaded_md.hardware_list));
+            testCase.verifyTrue(attached_md.point_of_contact.same_backing_location_as(loaded_md.point_of_contact));
 
             % Values should still read correctly.
             testCase.verifyEqual(attached_md.test_name(:), {'test program name'});
@@ -391,7 +394,7 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             attached_md = target.get_metadata('meta1');
 
             % Initially external-backed in the attached clone.
-            testCase.verifyEqual(attached_md.test_name.get_backing_state(), 'hdf5_external');
+            testCase.verifyTrue(attached_md.test_name.same_backing_location_as(loaded_md.test_name))
 
             % Mutating should materialize to memory for the clone.
             attached_md.test_name = {'Modified In Clone'};
@@ -464,8 +467,8 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             testCase.verifyFalse(attached_data == loaded_data);
 
             % Copied attached properties should now be externally backed.
-            testCase.verifyEqual(attached_data.value.get_backing_state(), 'hdf5_external');
-            testCase.verifyEqual(attached_data.unit.get_backing_state(), 'hdf5_external');
+            testCase.verifyTrue(attached_data.value.same_backing_location_as(loaded_data.value));
+            testCase.verifyTrue(attached_data.unit.same_backing_location_as(loaded_data.unit));
 
             % Values should still read correctly.
             testCase.verifyEqual(attached_data.value(:), 9.81);

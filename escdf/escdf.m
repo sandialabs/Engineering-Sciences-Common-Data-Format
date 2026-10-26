@@ -866,12 +866,9 @@ classdef escdf < handle
         %
         % - memory-backed properties are eagerly copied into new in-memory
         %   property wrappers
-        % - hdf5_native properties are wrapped as hdf5_external in the
-        %   clone
-        % - hdf5_external properties remain externally backed in the clone
-            backing_state = property.get_backing_state();
-
-            if strcmp(backing_state, 'memory')
+        % - hdf5-backed properties are copied to new containers and maintain
+        %   original hdf5_location.
+            if property.isinmemory()
                 cloned = escdf_property( ...
                     property.get_name(), ...
                     property.get_format(), ...
@@ -881,19 +878,18 @@ classdef escdf < handle
                 return
             end
 
-            if strcmp(backing_state, 'hdf5_native') || strcmp(backing_state, 'hdf5_external')
+            if ~isempty(property.get_hdf5_location())
                 source_dataset_id = property.get_h5d_id();
                 dataset_path = H5I.get_name(source_dataset_id);
                 file_id = H5I.get_file_id(source_dataset_id);
                 cloned_dataset_id = H5D.open(file_id, dataset_path);
 
                 cloned = escdf_property.load(cloned_dataset_id);
-                cloned.mark_external_backing();
                 return
             end
 
-            error('Unknown property backing_state "%s" for property %s.', ...
-                backing_state, property.get_name());
+            error('Could not clone property %s; it is neither memory-backed nor HDF5-backed.', ...
+                property.get_name());
         end
 
         function cloned = clone_dataset_for_attach(obj, dataset) %#ok<INUSD>

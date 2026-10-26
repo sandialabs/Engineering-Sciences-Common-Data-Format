@@ -53,18 +53,89 @@ classdef property_test < matlab.unittest.TestCase
         end
     end
 
+    methods (Static)
+        function [prop, parent_dataset, root_file, parent_group_id] = make_hdf5_property_with_logical_context(testCase, parent_name, property_name, data_type, data_size, ragged, in_memory)
+        % Create a property inside a minimal logical ESCDF context.
+        %
+        % Parameters
+        % ----------
+        % testCase : property_test
+        %     Test case object containing an open HDF5 file id.
+        % parent_name : char
+        %     Name of the logical parent dataset and HDF5 group.
+        % property_name : char
+        %     Property name.
+        % data_type : char
+        %     ESCDF property datatype.
+        % data_size : numeric array
+        %     Property size.
+        % ragged : logical
+        %     Whether the property is ragged.
+        % in_memory : logical
+        %     If true, create the property in memory. If false, create it
+        %     in the parent HDF5 group.
+        %
+        % Returns
+        % -------
+        % prop : escdf_property
+        %     Created property.
+        % parent_dataset : escdf_dataset
+        %     Logical parent dataset.
+        % root_file : escdf
+        %     Logical root container.
+        % parent_group_id : numeric
+        %     HDF5 group id for the logical parent dataset.
+            parent_group_id = H5G.create(testCase.file_id, parent_name, ...
+                'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+            root_file = escdf();
+            root_file.set_hdf5_location(HDF5Location.from_hdf5_id(testCase.file_id));
+
+            parent_dataset = escdf_dataset(parent_name, 'scalar', 'Property test logical parent');
+            root_file.insert_metadata_native(parent_dataset);
+
+            if in_memory
+                prop = escdf_property(property_name, data_type, data_size, ...
+                    'ragged', ragged);
+            else
+                prop = escdf_property(property_name, data_type, data_size, ...
+                    'hdf5groupid', parent_group_id, ...
+                    'ragged', ragged);
+            end
+
+            prop.set_logical_parent(parent_dataset);
+        end
+    end
+
     methods (Test)
         function testStorageAndRecall(testCase, data_type, data_size, stride, in_memory, ragged)
             ndim = length(data_size);
+            parent_group_id = [];
             try
                 if in_memory
                     name = [data_type,sprintf('_from_memory_ndim_%d_stride_%d',ndim,stride)];
-                    prop = escdf_property(name,data_type,data_size,'ragged',ragged);
                 else
                     name = [data_type,sprintf('_on_disk_ndim_%d_stride_%d',ndim,stride)];
-                    prop = escdf_property(name,data_type,data_size,'hdf5groupid',testCase.file_id,'ragged',ragged);
                 end
+
+                parent_name = [name, '_parent'];
+
+                [prop, parent_dataset, root_file, parent_group_id] = ...
+                    property_test.make_hdf5_property_with_logical_context( ...
+                        testCase, ...
+                        parent_name, ...
+                        name, ...
+                        data_type, ...
+                        data_size, ...
+                        ragged, ...
+                        in_memory); %#ok<ASGLU>
             catch ME
+                if ~isempty(parent_group_id)
+                    try
+                        H5G.close(parent_group_id);
+                    catch
+                    end
+                end
                 testCase.verifyEqual(ME.message,sprintf('Variable-length arrays of objects with type "%s" are not supported.',data_type))
                 return
             end
@@ -280,7 +351,7 @@ classdef property_test < matlab.unittest.TestCase
             testCase.verifyEqual(prop.isragged(), ragged);
 
             if in_memory
-                prop.write_to_disk(testCase.file_id);
+                prop.write_to_disk(parent_group_id);
                 if length(data_size) == 0
                     testCase.verifyEqual(prop(:),data);
                 elseif length(data_size) == 1
@@ -299,6 +370,9 @@ classdef property_test < matlab.unittest.TestCase
                 testCase.verifyEqual(prop(strides{:}),data);
             end
             testCase.verifyEqual(prop.isinmemory(),true);
+            if ~isempty(parent_group_id)
+                H5G.close(parent_group_id);
+            end
         end
 
         function test_new_in_memory_property_starts_memory_backed(testCase)
@@ -314,7 +388,15 @@ classdef property_test < matlab.unittest.TestCase
         end
 
         function test_loaded_property_starts_hdf5_native(testCase)
-            prop = escdf_property('p1', 'f8', [3], 'hdf5groupid', testCase.file_id);
+            [prop, parent_dataset, root_file, parent_group_id] = ...
+                property_test.make_hdf5_property_with_logical_context( ...
+                testCase, ...
+                'p1_parent', ...
+                'pi', ...
+                'f8', ...
+                [3], ...
+                false, ...
+                false); %#ok<ASGLU>
             prop(:) = [1.0; 2.0; 3.0];
 
             loaded = escdf_property.load(prop.get_h5d_id());
@@ -331,30 +413,6 @@ classdef property_test < matlab.unittest.TestCase
             testCase.verifyEqual(prop.get_backing_state(), 'memory');
             testCase.verifyTrue(prop.isinmemory());
             testCase.verifyEqual(prop(:), [1.0; 2.0; 3.0]);
-        end
-
-        function test_mark_external_backing_sets_external_state(testCase)
-            prop = escdf_property('p1', 'f8', [3], 'hdf5groupid', testCase.file_id);
-
-            prop.mark_external_backing();
-
-            testCase.verifyEqual(prop.get_backing_state(), 'hdf5_external');
-            testCase.verifyFalse(prop.isinmemory());
-        end
-
-        function test_assignment_to_external_backed_property_materializes_to_memory(testCase)
-            prop = escdf_property('p1', 'f8', [3], 'hdf5groupid', testCase.file_id);
-            prop(:) = [1.0; 2.0; 3.0];
-
-            prop.mark_external_backing();
-            testCase.verifyEqual(prop.get_backing_state(), 'hdf5_external');
-            testCase.verifyFalse(prop.isinmemory());
-
-            prop(:) = [10.0; 20.0; 30.0];
-
-            testCase.verifyEqual(prop.get_backing_state(), 'memory');
-            testCase.verifyTrue(prop.isinmemory());
-            testCase.verifyEqual(prop(:), [10.0; 20.0; 30.0]);
         end
 
         function test_compute_hyperslab_arguments_returns_expected_outputs(testCase)
@@ -384,10 +442,18 @@ classdef property_test < matlab.unittest.TestCase
         end
 
         function test_hdf5_location_object_compares_same_location(testCase)
-            prop1 = escdf_property('p1', 'f8', [3], 'hdf5groupid', testCase.file_id);
+            [prop1, parent_dataset, root_file, parent_group_id] = ...
+                property_test.make_hdf5_property_with_logical_context( ...
+                testCase, ...
+                'p1_parent', ...
+                'p1', ...
+                'f8', ...
+                [3], ...
+                false, ...
+                false); %#ok<ASGLU>
             prop1(:) = [1.0; 2.0; 3.0];
 
-            dataset_id = H5D.open(testCase.file_id, 'p1');
+            dataset_id = H5D.open(parent_group_id, 'p1');
             prop2 = escdf_property.load(dataset_id);
 
             testCase.verifyFalse(prop1 == prop2);
@@ -414,6 +480,104 @@ classdef property_test < matlab.unittest.TestCase
             testCase.verifyEqual(location.object_path, '/my_group/p1');
 
             H5G.close(group_id);
+        end
+
+        function test_assignment_to_loaded_native_property_writes_through_when_logical_and_backing_match(testCase)
+            outfile = fullfile(testCase.temp_folder, 'native_assignment.h5');
+
+            f = escdf();
+            md = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
+            md.value = 2.0;
+            md.unit = {'g'};
+            f.add_metadata(md);
+            f.write_to_disk(outfile, true);
+
+            loaded = escdf.load(outfile, false);
+            loaded_md = loaded.get_metadata('meta1');
+
+            testCase.verifyTrue(loaded_md.value.can_write_through_current_hdf5_backing());
+
+            loaded_md.value(:) = 5.0;
+
+            testCase.verifyFalse(loaded_md.value.isinmemory());
+            testCase.verifyEqual(double(loaded_md.value(:)), 5.0);
+
+            file_id = H5F.open(outfile, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
+            dataset_id = H5D.open(file_id, '/meta1/value');
+            disk_value = H5D.read(dataset_id);
+            H5D.close(dataset_id);
+            H5F.close(file_id);
+
+            testCase.verifyEqual(double(disk_value), 5.0);
+        end
+
+        function test_assignment_to_attached_hdf5_backed_property_materializes_and_preserves_source(testCase)
+            source_path = fullfile(testCase.temp_folder, 'source_assignment.h5');
+
+            source = escdf();
+            md = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
+            md.value = 2.0;
+            md.unit = {'g'};
+            source.add_metadata(md);
+            source.write_to_disk(source_path, true);
+
+            loaded = escdf.load(source_path, false);
+            loaded_md = loaded.get_metadata('meta1');
+
+            target = escdf();
+            target.add_metadata(loaded_md);
+            attached_md = target.get_metadata('meta1');
+
+            testCase.verifyFalse(attached_md.value.can_write_through_current_hdf5_backing());
+            testCase.verifyTrue(attached_md.value.same_backing_location_as(loaded_md.value));
+
+            attached_md.value(:) = 9.0;
+
+            testCase.verifyTrue(attached_md.value.isinmemory());
+            testCase.verifyTrue(isempty(attached_md.value.get_hdf5_location()));
+            testCase.verifyEqual(double(attached_md.value(:)), 9.0);
+
+            testCase.verifyFalse(loaded_md.value.isinmemory());
+            testCase.verifyEqual(double(loaded_md.value(:)), 2.0);
+
+            file_id = H5F.open(source_path, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
+            dataset_id = H5D.open(file_id, '/meta1/value');
+            disk_value = H5D.read(dataset_id);
+            H5D.close(dataset_id);
+            H5F.close(file_id);
+
+            testCase.verifyEqual(double(disk_value), 2.0);
+        end
+
+        function test_assignment_to_removed_hdf5_backed_property_materializes_and_preserves_source(testCase)
+            outfile = fullfile(testCase.temp_folder, 'removed_assignment.h5');
+
+            f = escdf();
+            md = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
+            md.value = 2.0;
+            md.unit = {'g'};
+            f.add_metadata(md);
+            f.write_to_disk(outfile, true);
+
+            loaded = escdf.load(outfile, false);
+            removed = loaded.remove_metadata('meta1');
+
+            testCase.verifyEmpty(removed.get_logical_parent());
+            testCase.verifyFalse(removed.value.can_write_through_current_hdf5_backing());
+
+            removed.value(:) = 7.0;
+
+            testCase.verifyTrue(removed.value.isinmemory());
+            testCase.verifyTrue(isempty(removed.value.get_hdf5_location()));
+            testCase.verifyEqual(double(removed.value(:)), 7.0);
+
+            file_id = H5F.open(outfile, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
+            dataset_id = H5D.open(file_id, '/meta1/value');
+            disk_value = H5D.read(dataset_id);
+            H5D.close(dataset_id);
+            H5F.close(file_id);
+
+            testCase.verifyEqual(double(disk_value), 2.0);
         end
 
     end

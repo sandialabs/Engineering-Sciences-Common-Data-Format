@@ -238,8 +238,17 @@ classdef escdf_property < handle
         % storage.
             switch S(1).type
                 case '()'
-                    if strcmp(obj.backing_state, 'hdf5_external')
-                        obj.read_into_memory();
+                    if ~obj.inmemory
+                        if ~obj.can_write_through_current_hdf5_backing()
+                            % Current backing is not the logical target, or
+                            % no logical target exists. Materialize to
+                            % memory before mutation.
+                            %
+                            % TODO: Future implementations may realize
+                            % into a native HDF5 target and mutate there
+                            % for large out-of-core workflows.
+                            obj.read_into_memory();
+                        end
                     end
                     if obj.inmemory
                         if any(strcmpi({'i1','i2','i4','i8','u1','u2','u4','u8','f4','f8'},obj.format))
@@ -432,6 +441,76 @@ classdef escdf_property < handle
 
             for i = 1:length(this_ancestry)
                 if ~(this_ancestry{i} == other_ancestry{i})
+                    return
+                end
+            end
+
+            tf = true;
+        end
+
+        function location = get_expected_hdf5_location(obj)
+        % Return the HDF5 location implied by this property's logical context.
+        %
+        % Returns
+        % -------
+        % location : HDF5Location or []
+        %     Expected HDF5 location if this property has a logical path and
+        %     its logical root has an HDF5 backing location. Otherwise empty.
+            logical_path = obj.get_logical_path();
+
+            if isempty(logical_path)
+                location = [];
+                return
+            end
+
+            root = obj.get_logical_root();
+
+            if isempty(root) || ~ismethod(root, 'get_hdf5_location')
+                location = [];
+                return
+            end
+
+            root_location = root.get_hdf5_location();
+
+            if isempty(root_location)
+                location = [];
+                return
+            end
+
+            location = HDF5Location( ...
+                root_location.file_path, ...
+                logical_path, ...
+                root_location.file_uuid);
+        end
+
+        function tf = can_write_through_current_hdf5_backing(obj)
+        % Return whether assignment may write through to current HDF5 backing.
+        %
+        % Returns
+        % -------
+        % tf : logical
+        %     True if the property is HDF5-backed at the location implied
+        %     by its logical context and the logical root is not read-only.
+            tf = false;
+
+            if obj.inmemory
+                return
+            end
+
+            current_location = obj.get_hdf5_location();
+            expected_location = obj.get_expected_hdf5_location();
+
+            if isempty(current_location) || isempty(expected_location)
+                return
+            end
+
+            if ~current_location.same_location_as(expected_location)
+                return
+            end
+
+            root = obj.get_logical_root();
+            if ~isempty(root) && ismethod(root, 'get_mutability_state')
+                if strcmp(root.get_mutability_state(), 'read_only')
                     return
                 end
             end
@@ -643,6 +722,8 @@ classdef escdf_property < handle
         end
 
         function mark_external_backing(obj)
+        % Deprecated transitional method.
+        %
         % Mark the property as externally backed.
         %
         % Notes

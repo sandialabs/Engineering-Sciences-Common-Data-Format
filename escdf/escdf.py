@@ -851,12 +851,10 @@ class ESCDF:
 
         - memory-backed properties are eagerly copied into new in-memory
           property wrappers
-        - ``hdf5_native`` properties are wrapped as ``hdf5_external`` in
-          the clone
-        - ``hdf5_external`` properties remain externally backed in the
-          clone
+        - hdf5-backed properties are copied to new containers and maintain
+          original hdf5_location.
         """
-        if property_.backing_state == "memory":
+        if property_.in_memory:
             cloned = ESCDFProperty(
                 property_.name,
                 property_.datatype,
@@ -866,13 +864,12 @@ class ESCDF:
             cloned[...] = property_[...]
             return cloned
 
-        if property_.backing_state in {"hdf5_native", "hdf5_external"}:
+        if property_.hdf5_location is not None:
             cloned = ESCDFProperty.load(h5_dataset=property_.h5_dataset)
-            cloned.mark_external_backing()
             return cloned
 
         raise ValueError(
-            f'Unknown property backing_state "{property_.backing_state}" for property {property_.name}.'
+            f"Could not clone property {property_.name}; it is neither memory-backed nor HDF5-backed."
         )
 
     @classmethod

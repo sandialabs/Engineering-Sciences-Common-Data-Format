@@ -170,6 +170,68 @@ class ESCDFProperty:
 
         return all(a is b for a, b in zip(this_ancestry, other_ancestry))
 
+    def expected_hdf5_location(self):
+        """
+        Return the HDF5 location implied by this property's logical context.
+
+        Returns
+        -------
+        HDF5Location or None
+            Expected HDF5 location if this property has a logical path and
+            its logical root has an HDF5 backing location. Otherwise
+            ``None``.
+
+        Notes
+        -----
+        This is the location where this property would be considered native
+        relative to its current logical object graph.
+        """
+        logical_path = self.logical_path
+        if logical_path is None:
+            return None
+
+        root = self.logical_root
+        if root is None:
+            return None
+
+        root_location = getattr(root, "hdf5_location", None)
+        if root_location is None:
+            return None
+
+        return HDF5Location(
+            root_location.file_path,
+            logical_path,
+            root_location.file_uuid,
+        )
+
+    def can_write_through_current_hdf5_backing(self):
+        """
+        Return whether assignment may write through to current HDF5 backing.
+
+        Returns
+        -------
+        bool
+            ``True`` if the property is HDF5-backed at the location implied
+            by its logical context and the logical root is not read-only.
+        """
+        if self.in_memory:
+            return False
+
+        current_location = self.hdf5_location
+        expected_location = self.expected_hdf5_location()
+
+        if current_location is None or expected_location is None:
+            return False
+
+        if not current_location.same_location_as(expected_location):
+            return False
+
+        root = self.logical_root
+        if getattr(root, "mutability_state", "editable") == "read_only":
+            return False
+
+        return True
+
     def __init__(
         self,
         name,
@@ -305,15 +367,19 @@ class ESCDFProperty:
         value : array-like
             Data to assign.
         """
-        if self._backing_state == "hdf5_external":
-            # TODO: This needs to be smarter when transfering between hdf5_external to hdf5_native
-            # as reading the whole dataset into memory may exhaust RAM with large datasets.
+        if not self.in_memory:
+            if self.can_write_through_current_hdf5_backing():
+                self.h5_dataset[key] = value
+                return
+
+            # Current backing is not the logical target, or no logical
+            # target exists. Materialize to memory before mutation.
+            #
+            # TODO: Future implementations may realize into a native HDF5
+            # target and mutate there for large out-of-core workflows.
             self.read_into_memory()
 
-        if not self.in_memory:
-            self.h5_dataset[key] = value
-        else:
-            self._data[key] = value
+        self._data[key] = value
 
     @staticmethod
     def _normalize_hdf5_filename(filename):
@@ -563,13 +629,18 @@ class ESCDFProperty:
 
     def mark_external_backing(self):
         """
-        Mark the property as externally backed.
+        Deprecated transitional method.
 
         Notes
         -----
-        This is intended for copied/attached property wrappers that still
-        reference an HDF5 source outside their new native context.
+        External/native status should be derived from backing location and
+        target location rather than stored on the property.
         """
+        warnings.warn(
+            "mark_external_backing is deprecated; external/native status is now derived from backing location.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if self._backing_state == "hdf5_native":
             self._backing_state = "hdf5_external"
 

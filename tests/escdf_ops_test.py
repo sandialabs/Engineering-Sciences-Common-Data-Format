@@ -414,10 +414,12 @@ def test_add_metadata_clones_hdf5_native_properties_as_external(tmp_path, monkey
     assert attached_md is not loaded_md
 
     # Copied attached properties should now be externally backed.
-    assert attached_md.test_name.backing_state == "hdf5_external"
-    assert attached_md.program.backing_state == "hdf5_external"
-    assert attached_md.hardware_list.backing_state == "hdf5_external"
-    assert attached_md.point_of_contact.backing_state == "hdf5_external"
+    assert attached_md.test_name.same_backing_location_as(loaded_md.test_name)
+    assert attached_md.program.same_backing_location_as(loaded_md.program)
+    assert attached_md.hardware_list.same_backing_location_as(loaded_md.hardware_list)
+    assert attached_md.point_of_contact.same_backing_location_as(
+        loaded_md.point_of_contact
+    )
 
     # Values should still read correctly.
     assert attached_md.test_name[...] == "test program name"
@@ -448,7 +450,7 @@ def test_mutating_external_backed_attached_metadata_materializes_clone_only(
     attached_md = target.metadata["meta1"]
 
     # Initially external-backed in the attached clone.
-    assert attached_md.test_name.backing_state == "hdf5_external"
+    assert attached_md.test_name.same_backing_location_as(loaded_md.test_name)
 
     # Mutating should materialize to memory for the clone.
     attached_md.test_name = "Modified In Clone"
@@ -528,8 +530,8 @@ def test_add_hdf5_native_data_to_activity_creates_external_backed_clone(
     attached_data = target.activities["act2"]["data1"]
 
     assert attached_data is not loaded_data
-    assert attached_data.value.backing_state == "hdf5_external"
-    assert attached_data.unit.backing_state == "hdf5_external"
+    assert attached_data.value.same_backing_location_as(loaded_data.value)
+    assert attached_data.unit.same_backing_location_as(loaded_data.unit)
 
     assert attached_data.value[...] == np.float64(9.81)
     assert attached_data.unit[...] == "m/s^2"
