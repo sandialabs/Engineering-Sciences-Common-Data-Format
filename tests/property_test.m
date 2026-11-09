@@ -105,6 +105,19 @@ classdef property_test < matlab.unittest.TestCase
 
             prop.set_logical_parent(parent_dataset);
         end
+        
+        function assign_property_values(prop, values)
+        % Assign values through a property for exception testing.
+        %
+        % Parameters
+        % ----------
+        % prop : escdf_property
+        %     Property whose indexed assignment is being tested.
+        % values : array-like
+        %     Values to assign.
+            prop(:) = values;
+        end
+
     end
 
     methods (Test)
@@ -578,6 +591,69 @@ classdef property_test < matlab.unittest.TestCase
             H5F.close(file_id);
 
             testCase.verifyEqual(double(disk_value), 2.0);
+        end
+
+        function test_memory_property_is_not_closed(testCase)
+        % Verify that memory-backed properties have no closed HDF5 ID.
+            prop = escdf_property('p1', 'f8', [3]);
+            prop(:) = [1.0; 2.0; 3.0];
+
+            testCase.verifyTrue(prop.isinmemory());
+            testCase.verifyFalse(prop.is_closed());
+            testCase.verifyEqual(prop(:), [1.0; 2.0; 3.0]);
+        end
+
+        function test_open_hdf5_property_is_not_closed(testCase)
+        % Verify that a usable HDF5 dataset ID is reported as open.
+            group_id = H5G.create( ...
+                testCase.file_id, 'open_parent', ...
+                'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+            group_cleanup = onCleanup(@() H5G.close(group_id)); %#ok<NASGU>
+
+            prop = escdf_property( ...
+                'p1', 'f8', [3], 'hdf5groupid', group_id);
+
+            testCase.verifyFalse(prop.isinmemory());
+            testCase.verifyFalse(prop.is_closed());
+
+            location = prop.get_hdf5_location();
+            testCase.verifyEqual(location.object_path, '/open_parent/p1');
+        end
+
+        function test_closed_hdf5_property_rejects_data_access(testCase)
+        % Verify that closing the dataset ID makes HDF5-dependent
+        % operations fail with the ESCDF closed-dataset error.
+            group_id = H5G.create( ...
+                testCase.file_id, 'closed_parent', ...
+                'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+            group_cleanup = onCleanup(@() H5G.close(group_id)); %#ok<NASGU>
+
+            prop = escdf_property( ...
+                'p1', 'f8', [3], 'hdf5groupid', group_id);
+
+            testCase.verifyFalse(prop.is_closed());
+            H5D.close(prop.get_h5d_id());
+
+            testCase.verifyFalse(prop.isinmemory());
+            testCase.verifyTrue(prop.is_closed());
+
+            testCase.verifyError( ...
+                @() prop(:), 'escdf_property:ClosedHDF5Dataset');
+            testCase.verifyError( ...
+                @() prop.get_hdf5_location(), ...
+                'escdf_property:ClosedHDF5Dataset');
+            testCase.verifyError( ...
+                @() prop.read_into_memory(), ...
+                'escdf_property:ClosedHDF5Dataset');
+            testCase.verifyError( ...
+                @() property_test.assign_property_values( ...
+                    prop, [1.0; 2.0; 3.0]), ...
+                'escdf_property:ClosedHDF5Dataset');
+
+            % Wrapper metadata remains available without the HDF5 ID.
+            testCase.verifyEqual(prop.get_name(), 'p1');
+            testCase.verifyEqual(prop.get_format(), 'f8');
+            testCase.verifyEqual(prop.get_size(), [3]);
         end
 
     end

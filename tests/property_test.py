@@ -478,3 +478,54 @@ def test_assignment_to_removed_hdf5_backed_property_materializes_and_preserves_s
 
     with h5py.File(file_path, "r") as h5_file:
         assert h5_file["meta1"]["value"][()] == 2.0
+
+
+def test_memory_property_is_not_closed():
+    """A memory-backed property has no HDF5 handle to close."""
+    prop = escdf.Property("p1", "f8", (3,))
+    prop[...] = np.array([1.0, 2.0, 3.0])
+
+    assert prop.in_memory
+    assert prop.is_closed is False
+    np.testing.assert_array_equal(prop[...], [1.0, 2.0, 3.0])
+
+
+def test_open_hdf5_property_is_not_closed(hdf5_file_path):
+    """An HDF5 property reports an open handle while its file is open."""
+    with h5py.File(hdf5_file_path, "r+") as h5_file:
+        group = h5_file.create_group("parent")
+        prop = escdf.Property("p1", "f8", (3,), hdf5group=group)
+
+        assert prop.in_memory is False
+        assert prop.is_closed is False
+        assert prop.hdf5_location.object_path == "/parent/p1"
+        np.testing.assert_array_equal(prop[...], [0.0, 0.0, 0.0])
+
+
+def test_closed_hdf5_property_rejects_data_access(hdf5_file_path):
+    """A closed dataset handle raises a clear error on HDF5-dependent access."""
+    with h5py.File(hdf5_file_path, "r+") as h5_file:
+        group = h5_file.create_group("parent")
+        prop = escdf.Property("p1", "f8", (3,), hdf5group=group)
+        assert prop.is_closed is False
+
+    # Closing the owning file invalidates the cached dataset handle.
+    assert prop.in_memory is False
+    assert prop.is_closed is True
+
+    with pytest.raises(RuntimeError, match="closed HDF5 handle"):
+        _ = prop[...]
+
+    with pytest.raises(RuntimeError, match="closed HDF5 handle"):
+        prop[...] = np.array([1.0, 2.0, 3.0])
+
+    with pytest.raises(RuntimeError, match="closed HDF5 handle"):
+        prop.read_into_memory()
+
+    with pytest.raises(RuntimeError, match="closed HDF5 handle"):
+        _ = prop.hdf5_location
+
+    # Metadata held on the wrapper remains inspectable.
+    assert prop.name == "p1"
+    assert prop.datatype == "f8"
+    assert prop.shape == (3,)

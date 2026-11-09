@@ -178,6 +178,7 @@ classdef escdf_property < handle
                         end
                         varargout{1} = builtin('subsref', obj.data, S);
                     else
+                        obj.assert_open_hdf5();
                         % builtin('disp',S)
                         if ~isempty(obj.size)
                             % Need to compute the start, step, and stride
@@ -236,6 +237,7 @@ classdef escdf_property < handle
             switch S(1).type
                 case '()'
                     if ~obj.inmemory
+                        obj.assert_open_hdf5();
                         if ~obj.can_write_through_current_hdf5_backing()
                             % Current backing is not the logical target, or
                             % no logical target exists. Materialize to
@@ -315,6 +317,57 @@ classdef escdf_property < handle
             id = obj.h5d_id;
         end
 
+        function tf = is_closed(obj)
+        % Return whether this property's HDF5 dataset ID is closed.
+        %
+        % Returns
+        % -------
+        % tf : logical
+        %     True if an HDF5-backed property's dataset ID is invalid.
+        %     In-memory properties return false.
+        %
+        % Raises
+        % ------
+        % error
+        %     Rethrows HDF5 errors unrelated to an invalid dataset ID.
+            if obj.inmemory
+                tf = false;
+                return
+            end
+
+            try
+                space_id = H5D.get_space(obj.h5d_id);
+            catch ME
+                if contains(lower(ME.message), 'invalid dataset identifier')
+                    tf = true;
+                    return
+                end
+                rethrow(ME)
+            end
+
+            H5S.close(space_id);
+            tf = false;
+        end
+
+        function assert_open_hdf5(obj)
+        % Require an open HDF5 dataset ID for this property.
+        %
+        % Raises
+        % ------
+        % error
+        %     Raised if this HDF5-backed property's dataset ID is closed.
+        %
+        % Notes
+        % -----
+        % Memory-backed properties do not require an HDF5 dataset ID.
+            if obj.is_closed()
+                error('escdf_property:ClosedHDF5Dataset', ...
+                    ['Property "%s" has a closed HDF5 dataset ID. ', ...
+                     'Reload or rebind the property before accessing its data.'], ...
+                    obj.name);
+            end
+        end
+
         function location = get_hdf5_location(obj)
         % Return the current HDF5 backing location.
         %
@@ -327,6 +380,7 @@ classdef escdf_property < handle
                 return
             end
 
+            obj.assert_open_hdf5();
             location = HDF5Location.from_hdf5_id(obj.h5d_id);
         end
 
@@ -663,7 +717,7 @@ classdef escdf_property < handle
 
             error('Property %s could not be realized to disk.', obj.name);
         end
-        
+
         function read_into_memory(obj)
         % Load the property fully into memory.
         %
@@ -675,6 +729,7 @@ classdef escdf_property < handle
                 warning(['Call to the read_into_memory method is unnecessary for dataset "',obj.name,'" as the data is already in memory.  Data was not read for this dataset.'])
                 return
             else
+                obj.assert_open_hdf5();
                 indices = repmat({':'}, 1, length(obj.size));
                 S.type = '()';
                 S.subs = {':'};
@@ -707,8 +762,8 @@ classdef escdf_property < handle
         end
 
         function delete(obj)
-            if ~obj.inmemory% && ~ismissing(obj.h5d_id)
-                H5D.close(obj.h5d_id)
+            if ~obj.inmemory && ~obj.is_closed()
+                H5D.close(obj.h5d_id);
             end
         end
 

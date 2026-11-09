@@ -87,6 +87,34 @@ class ESCDFProperty:
         return self._h5_dataset
 
     @property
+    def is_closed(self) -> bool:
+        """
+        Return whether this property's HDF5 dataset handle is closed.
+
+        Returns
+        -------
+        bool
+            ``True`` when an HDF5-backed property has an invalid dataset
+            handle. Memory-backed properties return ``False``.
+        """
+        return self._h5_dataset is not None and not bool(self._h5_dataset.id.valid)
+
+    def _require_open_hdf5(self) -> None:
+        """
+        Require a valid HDF5 dataset handle for an HDF5-backed property.
+
+        Raises
+        ------
+        RuntimeError
+            If the property's HDF5 dataset handle has been closed.
+        """
+        if self.is_closed:
+            raise RuntimeError(
+                f'Property "{self.name}" has a closed HDF5 handle. '
+                "Reload or explicitly rebind it before accessing its data."
+            )
+
+    @property
     def in_memory(self):
         return self.h5_dataset is None
 
@@ -334,6 +362,7 @@ class ESCDFProperty:
         strings on access.
         """
         if not self.in_memory:
+            self._require_open_hdf5()
             out = self.h5_dataset[key]
             if self.datatype == "str":
                 decoder = np.vectorize(
@@ -359,6 +388,7 @@ class ESCDFProperty:
             Data to assign.
         """
         if not self.in_memory:
+            self._require_open_hdf5()
             if self.can_write_through_current_hdf5_backing():
                 self.h5_dataset[key] = value
                 return
@@ -423,6 +453,7 @@ class ESCDFProperty:
         """
         if self.in_memory:
             return None
+        self._require_open_hdf5()
         return HDF5Location.from_h5_object(self.h5_dataset)
 
     def target_hdf5_location(self, h5_group):
@@ -590,6 +621,7 @@ class ESCDFProperty:
                 )
             )
             return
+        self._require_open_hdf5()
         if self.datatype == "str":
             self._data = StringArray(self.shape)
         elif self.datatype == "bytes" or self.ragged:
