@@ -140,8 +140,8 @@ in-memory ESCDF graph.
 Examples:
 
 ```text
-/metadata/geometry
-/metadata/geometry/node_position
+/geometry
+/geometry/node_position
 /activities/modal_test
 /activities/modal_test/time_data
 /activities/modal_test/time_data/ordinate
@@ -163,8 +163,8 @@ storage.
 Examples:
 
 ```text
-source_file.h5::/metadata/geometry
-source_file.h5::/metadata/geometry/node_position
+source_file.h5::/geometry
+source_file.h5::/geometry/node_position
 source_file.h5::/activities/modal_test/time_data/ordinate
 ```
 
@@ -173,7 +173,7 @@ For memory-backed objects, the backing location may be `None`.
 A backing location should contain enough information to distinguish:
 
 - file A vs file B
-- group `/metadata/geometry` in one file vs the same path in another file
+- group `/geometry` in one file vs the same path in another file
 - dataset `/ordinate` in one dataset group vs another
 
 A backing location may be implemented as a small value object or struct
@@ -290,8 +290,8 @@ being realized.
 Example:
 
 ```text
-property.backing_location = source_file.h5::/metadata/geometry/node_id
-target_location           = target_file.h5::/metadata/geometry/node_id
+property.backing_location = source_file.h5::/geometry/node_id
+target_location           = target_file.h5::/geometry/node_id
 
 property is external relative to target
 ```
@@ -555,8 +555,8 @@ the operation should:
 This means the new object may have:
 
 ```text
-logical_location = target_file::/metadata/geometry
-backing_location = source_file.h5::/metadata/geometry
+logical_location = target_file::/geometry
+backing_location = source_file.h5::/geometry
 ```
 
 This is a valid intermediate state.
@@ -636,6 +636,53 @@ write the current logical graph into a coherent target HDF5 file
 ```
 
 The source backing files should not be mutated implicitly.
+
+### Realization API Signatures
+
+Only the top-level container exposes the user-facing file-write method:
+
+```text
+container.write_to_disk(file_path, ...)
+```
+
+Lower hierarchy levels expose target-parent realization:
+
+```text
+property.realize_to_hdf5(dataset_group, ...)
+dataset.realize_to_hdf5(parent_group, ...)
+activity.realize_to_hdf5(activities_group, ...)
+container.realize_to_hdf5(hdf5_file, ...)
+```
+
+Each object receives its HDF5 parent and creates or updates its own child object under that parent.
+
+`write_to_disk(...)` means "produce a complete ESCDF file at this filesystem location."
+`realize_to_hdf5(...)` means "synchronize this logical node beneath an already-open HDF5 parent."
+
+The desired user-facing contract is that `write_to_disk(...)` returns only
+after the target is flushed and closed and is safe to copy or move.
+
+If the current implementation retains an open file handle, that behavior
+is transitional. Long-lived writable handles should eventually be exposed
+through an explicit writer/session API rather than the default
+`write_to_disk(...)` operation.
+
+### HDF5 Handles and Backing Identity
+
+ESCDF objects may cache live HDF5 handles when useful for performance or
+out-of-core I/O.
+
+Live handles are access mechanisms, not backing identity. Handles may be
+closed, reopened, duplicated, or represented differently across Python
+and MATLAB.
+
+Backing identity is determined by `HDF5Location`, using a normalized file
+path and internal HDF5 object path. Future versions may add a file UUID
+without changing the realization APIs.
+
+Temporary MATLAB HDF5 identifiers should be closed reliably, commonly
+with `onCleanup`. A location should be captured while the identifier is
+valid.
 
 ---
 

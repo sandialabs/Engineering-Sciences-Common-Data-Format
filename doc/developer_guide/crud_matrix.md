@@ -43,14 +43,14 @@ This matrix is organized by object level:
 | ESCDF container | Load file | Load an ESCDF HDF5 file into memory-backed objects | Implemented | Implemented | Canonical spec model now drives loading behavior |
 | ESCDF container | Write file | Validate and write an ESCDF file to disk | Implemented | Implemented | Uses canonical validation by default |
 | ESCDF container | Set created metadata | Set `created_by` and `created_date` | Implemented | Implemented | Public API present in both languages |
-| ESCDF container | Read created metadata | Access `created_by` / `created_date` | Implemented | Partially implemented | Python has direct properties; MATLAB often verifies indirectly or through display/file |
-| ESCDF container | Remove activity | Remove an activity by name | Implemented | Implemented | Present, but semantics should be documented clearly |
-| ESCDF container | Remove metadata | Remove metadata by name | Implemented | Implemented | Present, but behavior with active links should be documented clearly |
-| ESCDF container | Rename activity | Rename an activity and preserve internal contents/links | Missing | Missing | High-value user-facing gap |
-| ESCDF container | Rename metadata | Rename metadata and update links automatically | Missing | Missing | High-value user-facing gap |
+| ESCDF container | Read created metadata | Access `created_by` / `created_date` | Implemented | Implemented | Python properties and MATLAB getter methods are available |
+| ESCDF container | Remove activity | Remove an activity by name and return it | Implemented | Implemented | Leaves metadata intact by default; optional cleanup removes only newly orphaned metadata |
+| ESCDF container | Remove metadata | Remove metadata by name and return it | Implemented | Implemented | Fails while linked by default; `unlink` option removes links automatically |
+| ESCDF container | Rename activity | Rename an activity in the logical graph | Implemented | Implemented | Validates the name; physical HDF5 rename is deferred until realization |
+| ESCDF container | Rename metadata | Rename metadata and update activity links | Implemented | Implemented | Validates the name and updates all logical links |
 | ESCDF container | Copy activity | Duplicate an activity under a new name | Missing | Missing | Useful but lower priority |
-| ESCDF container | Copy metadata | Duplicate metadata under a new name | Missing | Missing | Useful but lower priority |
-| ESCDF container | Replace metadata | Replace an existing metadata object in-place | Missing | Missing | Could be expressed via remove + add, but no dedicated API |
+| ESCDF container | Copy metadata | Duplicate metadata under a new name | Partially implemented | Partially implemented | Adding existing metadata clones wrappers and preserves HDF5 backing locations; no dedicated copy API |
+| ESCDF container | Replace metadata | Replace metadata with another dataset of the same name | Implemented | Implemented | Returns the replaced metadata object and preserves links by name |
 | ESCDF container | Replace activity | Replace an activity object in-place | Missing | Missing | Not currently a supported workflow |
 | ESCDF container | Summary / repr | Human-readable summary of contents | Implemented | Implemented | Could still be improved further |
 | ESCDF container | Dump to plain structure | Export container to plain dict/struct | Partially implemented | Implemented | MATLAB has `dump_to_struct`; Python equivalent is weaker/nonexistent |
@@ -65,8 +65,8 @@ This matrix is organized by object level:
 | Activity | Read by name | Retrieve one activity by name | Implemented | Implemented | |
 | Activity | List names | List all activity names | Implemented | Implemented | |
 | Activity | Update description/date | Modify activity descriptive fields after creation | Partially implemented | Partially implemented | Possible through object mutation, but not strongly surfaced/documented |
-| Activity | Rename | Rename activity object | Missing | Missing | High-value CRUD gap |
-| Activity | Delete | Remove activity from container | Implemented | Implemented | |
+| Activity | Rename | Rename activity object through the owning container | Implemented | Implemented | `rename_activity(...)`; rename authority remains with the owning collection |
+| Activity | Delete | Remove activity from container and return it | Implemented | Implemented | Logical removal only; backing is not deleted immediately |
 | Activity | Link metadata | Link metadata name to activity | Implemented | Implemented | |
 | Activity | Unlink metadata | Remove metadata link from activity | Implemented | Implemented | |
 | Activity | Get linked metadata names | Inspect metadata links | Implemented | Implemented | |
@@ -74,9 +74,9 @@ This matrix is organized by object level:
 | Activity | Add data | Add result dataset to activity | Implemented | Implemented | |
 | Activity | Read data by name | Retrieve one activity dataset by name | Implemented | Implemented | |
 | Activity | List data names | List all result datasets in activity | Implemented | Implemented | |
-| Activity | Remove data | Remove dataset from activity | Implemented | Implemented | |
-| Activity | Replace data | Replace one dataset in activity | Missing | Missing | High-value editing gap |
-| Activity | Rename data | Rename one dataset within activity | Missing | Missing | High-value editing gap |
+| Activity | Remove data | Remove dataset from activity and return it | Implemented | Implemented | Removed dataset becomes a free logical object |
+| Activity | Replace data | Replace one dataset in activity | Implemented | Implemented | Available at activity level and through the top-level container |
+| Activity | Rename data | Rename one dataset within activity | Implemented | Implemented | Available as `rename_data(...)` and top-level `rename_activity_data(...)` |
 | Activity | Reorder data | Preserve/alter ordering of activity datasets | Not needed / missing | Not needed / missing | Usually not essential unless ordering matters for UI |
 
 ---
@@ -90,7 +90,7 @@ This matrix is organized by object level:
 | Metadata dataset | Read by name | Retrieve metadata dataset from container | Implemented | Implemented | |
 | Metadata dataset | Update property values | Assign or replace spec-defined properties | Implemented | Implemented | Canonical assignment path now used |
 | Metadata dataset | Clear property | Remove a property value by assigning `None` / `[]` | Implemented | Implemented | This is the effective property-delete mechanism |
-| Metadata dataset | Rename dataset | Rename metadata dataset object | Missing | Missing | Distinct from renaming the underlying object variable |
+| Metadata dataset | Rename dataset | Rename metadata through the owning container | Implemented | Implemented | `rename_metadata(...)` updates activity links; no immediate HDF5 group rename |
 | Metadata dataset | Delete from container | Remove metadata dataset | Implemented | Implemented | |
 | Metadata dataset | Delete unknown extra property | Remove loaded malformed/extra field | Missing | Missing | Potential future editing helper |
 | Metadata dataset | Inspect type/version/supertypes | Read canonical type metadata | Implemented | Implemented | Canonical model now backs this behavior |
@@ -109,7 +109,7 @@ This matrix is organized by object level:
 | Activity result dataset | Read by name | Retrieve from activity | Implemented | Implemented | |
 | Activity result dataset | Update property values | Assign or replace spec-defined properties | Implemented | Implemented | Canonical assignment path now used |
 | Activity result dataset | Clear property | Remove a property value by assigning `None` / `[]` | Implemented | Implemented | |
-| Activity result dataset | Rename dataset | Rename activity dataset object | Missing | Missing | High-value editing gap |
+| Activity result dataset | Rename dataset | Rename dataset through its owning activity or container | Implemented | Implemented | `rename_data(...)` / `rename_activity_data(...)`; persisted on realization |
 | Activity result dataset | Delete from activity | Remove dataset from activity | Implemented | Implemented | |
 | Activity result dataset | Validate | Validate against canonical spec | Implemented | Implemented | |
 | Activity result dataset | Structured validation report | Request detailed validation report | Implemented | Implemented | |
@@ -130,7 +130,7 @@ This matrix is organized by object level:
 | Property | Rename property | Rename spec-defined property | Not needed | Not needed | Property names are part of the specification |
 | Property | Remove unknown extra property | Remove malformed loaded extra property | Missing | Missing | Could be a useful future editing helper |
 | Property | Read into memory | Force on-disk property into memory | Implemented | Implemented | |
-| Property | Write to disk | Write one property into HDF5 group | Implemented | Implemented | |
+| Property | Realize to HDF5 | Realize one property beneath an already-open dataset group | Implemented | Implemented | Internal/advanced API; target-aware realization uses HDF5 backing locations |
 | Property | Preserve on-disk backing | Keep property disk-backed where applicable | Implemented | Implemented | Out-of-core ergonomics still need work |
 
 ---
@@ -139,13 +139,19 @@ This matrix is organized by object level:
 
 | Object level | Operation | Expected workflow | Python status | MATLAB status | Notes / gap |
 |---|---|---|---|---|---|
+| Attachments | List attachment names | Return attachment names in stored order | Implemented | Implemented | |
+| Attachments | Find attachment index | Look up an attachment by name | Implemented | Implemented | Python returns zero-based index; MATLAB returns one-based index |
 | Attachments | Set from files | Read files and store as `attachments` + `attachment_names` | Implemented | Implemented | |
 | Attachments | Read stored attachment names | Inspect `attachment_names` | Implemented | Implemented | |
-| Attachments | Dump attachments to disk | Write stored attachments back to files | Implemented | Implemented | |
+| Attachments | Dump one attachment to disk | Extract one named attachment | Implemented | Implemented | |
+| Attachments | Dump all attachments to disk | Write all stored attachments back to files | Implemented | Implemented | |
 | Attachments | Replace full attachment set | Reassign `attachments` / `attachment_names` | Implemented | Implemented | Through normal property assignment |
 | Attachments | Remove one attachment | Remove one attachment by name | Missing | Missing | Good candidate for user-editing milestone |
 | Attachments | Clear all attachments | Remove all attachments cleanly | Partially implemented | Partially implemented | Can be done by clearing properties, but no dedicated helper |
 | Attachments | Validate name/data consistency | Ensure `attachments` and `attachment_names` stay compatible | Implemented | Implemented | Via canonical validation + `requires` |
+| Attachments | Add one attachment | Append one attachment without materializing all existing attachments | Deferred | Deferred | Requires extensible-array/out-of-core realization support |
+| Attachments | Remove one attachment | Remove one attachment without materializing all existing attachments | Deferred | Deferred | Requires extensible-array/out-of-core realization support |
+| Attachments | Replace one attachment | Replace one attachment payload efficiently | Deferred | Deferred | Requires realization/update strategy |
 
 ---
 
@@ -184,25 +190,27 @@ This matrix is organized by object level:
 
 ## Summary of major remaining user-facing gaps
 
-The largest user-facing gaps remaining are:
+The largest remaining gaps are:
 
-1. **Rename operations**
-   - rename activity
-   - rename metadata
-   - rename dataset within an activity
+1. **Realization and synchronization hardening**
+   - ensure logical remove/rename/replace operations are correctly reflected in realized HDF5 targets
+   - ensure realization is idempotent and target-aware
+   - guarantee safe flush/close behavior for user-facing writes
 
-2. **Replace/upsert operations**
-   - replace dataset in activity
-   - replace metadata in container
+2. **Out-of-core realization strategies**
+   - direct HDF5-to-HDF5 copy
+   - streamed/block copy
+   - chunk-aware realization
 
-3. **Fine-grained attachment editing**
-   - remove one attachment
-   - clear all attachments with a dedicated helper
+3. **Extensible and appendable arrays**
+   - support growing dimensions
+   - enable efficient attachment mutation and acquisition workflows
 
-4. **Explicit cleanup of malformed extra properties**
-   - remove unknown extra field from a loaded modified dataset
+4. **Lifecycle enforcement**
+   - finalized/frozen file semantics
+   - mutation gating
+   - persisted lifecycle metadata
 
-5. **Formal parity cleanup**
-   - ensure Python and MATLAB provide equivalent editing workflows even if syntax differs
-
-These are strong candidates for the next milestone.
+5. **Additional editing conveniences**
+   - malformed extra-property cleanup
+   - optional explicit copy/move helpers if user workflows justify them
