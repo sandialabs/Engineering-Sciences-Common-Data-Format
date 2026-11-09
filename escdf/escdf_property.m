@@ -663,16 +663,7 @@ classdef escdf_property < handle
 
             error('Property %s could not be realized to disk.', obj.name);
         end
-
-        function write_to_disk(obj, h5g_id)
-        % Write the property to an HDF5 group.
-        %
-        % Notes
-        % -----
-        % Compatibility wrapper around realize_to_hdf5.
-            obj.realize_to_hdf5(h5g_id, 'memory', false);
-        end
-
+        
         function read_into_memory(obj)
         % Load the property fully into memory.
         %

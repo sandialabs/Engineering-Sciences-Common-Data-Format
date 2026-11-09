@@ -775,11 +775,22 @@ classdef escdf_activity < handle
                 overwrite = false;
             end
 
-            if H5L.exists(activities_group_id, obj.name, 'H5P_DEFAULT')
-                if ~overwrite
-                    error('Target activities group already contains activity "%s". Use overwrite=true to replace it explicitly.', obj.name)
+            if H5L.exists(activities_group_id, obj.name, 'H5P_DEFAULT') ~= 0
+                if ~obj.needs_realization(activities_group_id)
+                    return
                 end
-                H5L.delete(activities_group_id, obj.name, 'H5P_DEFAULT');
+
+                if ~overwrite
+                    error( ...
+                        ['Target activities group already contains activity "%s". ' ...
+                         'Use overwrite=true to replace it explicitly.'], ...
+                        obj.name);
+                end
+
+                H5L.delete( ...
+                    activities_group_id, ...
+                    obj.name, ...
+                    'H5P_DEFAULT');
             end
 
             gid = H5G.create(activities_group_id,obj.name,'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
@@ -823,27 +834,20 @@ classdef escdf_activity < handle
             H5S.close(dataspace_id);
             H5T.close(str_type_id);
 
-            % Realize activity datasets
+            % Realize activity datasets. Each dataset creates or updates
+            % its own group beneath this activity group.
             for j = 1:length(obj.data)
                 this_data = obj.data(j);
-                this_gid = H5G.create(gid,this_data.get_name(),'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
-                this_data.realize_to_hdf5(this_gid, strategy, overwrite);
-                H5G.close(this_gid);
+                this_data.realize_to_hdf5( ...
+                    gid, ...
+                    strategy, ...
+                    overwrite);
             end
 
             obj.hdf5_location = HDF5Location.from_hdf5_id(gid);
             obj.has_pending_changes = false;
 
             H5G.close(gid)
-        end
-
-        function write_to_disk(obj, activities_group_id)
-        % Write the activity to an HDF5 activities group.
-        %
-        % Notes
-        % -----
-        % Compatibility wrapper around realize_to_hdf5.
-            obj.realize_to_hdf5(activities_group_id,'memory',false);
         end
 
         function varargout = subsref(obj, S)

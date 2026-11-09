@@ -351,7 +351,7 @@ classdef property_test < matlab.unittest.TestCase
             testCase.verifyEqual(prop.isragged(), ragged);
 
             if in_memory
-                prop.write_to_disk(parent_group_id);
+                prop.realize_to_hdf5(parent_group_id);
                 if length(data_size) == 0
                     testCase.verifyEqual(prop(:),data);
                 elseif length(data_size) == 1

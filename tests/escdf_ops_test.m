@@ -525,7 +525,7 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             testCase.verifyFalse(loaded_activity.get_has_pending_changes());
         end
 
-        function test_activity_write_to_disk_sets_hdf5_native_and_clears_pending_changes(testCase)
+        function test_activity_realize_to_hdf5_sets_location_and_clears_pending_changes(testCase)
         % Verify that writing an activity to disk sets it HDF5-native and
         % clears pending changes.
             outfile = fullfile(testCase.temp_folder, 'activity_write_state.h5');
@@ -540,7 +540,7 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             testCase.verifyEmpty(activity.get_hdf5_location());
             testCase.verifyTrue(activity.get_has_pending_changes());
 
-            activity.write_to_disk(activity_group);
+            activity.realize_to_hdf5(activity_group);
 
             testCase.verifyNotEmpty(activity.get_hdf5_location());
             testCase.verifyFalse(activity.get_has_pending_changes());

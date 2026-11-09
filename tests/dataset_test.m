@@ -431,7 +431,7 @@ classdef dataset_test < matlab.unittest.TestCase
                 testCase.verifyEqual(prop(:), prop_data);
             end
             % Now write the data file to disk and then read again
-            test_dataset.write_to_disk(testCase.file_id)
+            test_dataset.realize_to_hdf5(testCase.file_id)
             % Now read the data back to make sure we get it
             for i = 1:length(testCase.test_property_names)
                 prop_name = testCase.test_property_names{i};
@@ -583,8 +583,6 @@ classdef dataset_test < matlab.unittest.TestCase
         function test_dataset_write_to_disk_sets_hdf5_native_and_clears_pending_changes(testCase)
         % Verify that writing a dataset to disk sets it HDF5-native and
         % clears pending changes.
-            gid = H5G.create(testCase.file_id, 'meta1', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
-
             ds = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
             ds.value = 2.0;
             ds.unit = {'g'};
@@ -592,12 +590,15 @@ classdef dataset_test < matlab.unittest.TestCase
             testCase.verifyTrue(ds.get_has_pending_changes());
             testCase.verifyEmpty(ds.get_hdf5_location());
 
-            ds.write_to_disk(gid);
+            ds.realize_to_hdf5(testCase.file_id);
 
+            testCase.verifyTrue( ...
+                H5L.exists( ...
+                    testCase.file_id, ...
+                    'meta1', ...
+                    'H5P_DEFAULT') ~= 0);
             testCase.verifyNotEmpty(ds.get_hdf5_location());
             testCase.verifyFalse(ds.get_has_pending_changes());
-
-            H5G.close(gid);
         end
 
         function test_dataset_read_into_memory_sets_memory_backing_state(testCase)
@@ -651,14 +652,15 @@ classdef dataset_test < matlab.unittest.TestCase
         function test_dataset_realize_to_hdf5_writes_properties_and_attributes(testCase)
             outfile = fullfile(testCase.temp_folder, 'dataset_realize.h5');
             file_id = H5F.create(outfile, 'H5F_ACC_TRUNC', 'H5P_DEFAULT', 'H5P_DEFAULT');
-            group_id = H5G.create(file_id, 'meta1', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
 
             ds = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
             ds.value = 2.0;
             ds.unit = {'g'};
             testCase.verifyTrue(ds.validate());
 
-            ds.realize_to_hdf5(group_id);
+            ds.realize_to_hdf5(file_id);
+
+            group_id = H5G.open(file_id, 'meta1');
 
             testCase.verifyNotEmpty(ds.get_hdf5_location());
             testCase.verifyFalse(ds.get_has_pending_changes());
@@ -731,13 +733,13 @@ classdef dataset_test < matlab.unittest.TestCase
         end
 
         function test_dataset_is_realized_at_true_after_realization(testCase)
-            group_id = H5G.create(testCase.file_id, 'meta1', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
-
             ds = escdf_dataset('meta1', 'scalar', 'Scalar metadata');
             ds.value = 2.0;
             ds.unit = {'g'};
 
-            ds.realize_to_hdf5(group_id);
+            ds.realize_to_hdf5(testCase.file_id);
+
+            group_id = H5G.open(testCase.file_id, 'meta1')
 
             testCase.verifyTrue(ds.is_realized_at(group_id));
             testCase.verifyTrue(ds.is_realized_under(testCase.file_id));

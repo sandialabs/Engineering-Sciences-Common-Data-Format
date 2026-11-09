@@ -1149,21 +1149,14 @@ classdef escdf < handle
             H5T.close(str_type_id);
             H5S.close(attr_space_id);
 
-            % Metadata groups
+            % Metadata datasets create or update their own groups beneath
+            % the file root.
             for i = 1:length(obj.metadata)
                 md = obj.metadata(i);
-                md_name = md.get_name();
-
-                if H5L.exists(file_id, md_name, 'H5P_DEFAULT')
-                    if ~overwrite
-                        error('Target HDF5 file already contains metadata group "%s". Use overwrite=true to replace it explicitly.', md_name)
-                    end
-                    H5L.delete(file_id, md_name, 'H5P_DEFAULT');
-                end
-
-                gid = H5G.create(file_id, md_name, 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
-                md.realize_to_hdf5(gid, strategy, overwrite);
-                H5G.close(gid);
+                md.realize_to_hdf5( ...
+                    file_id, ...
+                    strategy, ...
+                    overwrite);
             end
 
             % Activities group
@@ -1178,11 +1171,10 @@ classdef escdf < handle
 
             for i = 1:length(obj.activities)
                 activity = obj.activities(i);
-                if ismethod(activity, 'realize_to_hdf5')
-                    activity.realize_to_hdf5(agid, strategy, overwrite);
-                else
-                    activity.write_to_disk(agid);
-                end
+                activity.realize_to_hdf5( ...
+                    agid, ...
+                    strategy, ...
+                    overwrite);
             end
 
             H5G.close(agid);
