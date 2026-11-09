@@ -220,7 +220,7 @@ def test_storage_and_recall(
     assert prop.ragged == ragged
 
     if in_memory:
-        prop.write_to_disk(hdf5_file[parent.name])
+        prop.realize_to_hdf5(hdf5_file[parent.name])
         if len(data_shape) == 0:
             prop[...] = data
             if data.dtype == "object":

@@ -686,7 +686,7 @@ class ESCDFActivity:
     def __repr__(self):
         return self.repr()
 
-    def realize_to_hdf5(self, activity_groups, strategy="memory", overwrite=False):
+    def realize_to_hdf5(self, activity_groups, strategy="auto", overwrite=False):
         """
         Realize the activity into an HDF5 activities group.
 
@@ -694,7 +694,7 @@ class ESCDFActivity:
         ----------
         activity_groups : h5py.Group
             HDF5 group containing all activities.
-        strategy : {'memory'}, optional
+        strategy : {'auto','memory'}, optional
             Dataset/property realization strategy. The first-pass
             implementation supports only ``"memory"``.
         overwrite : bool, optional
@@ -728,30 +728,14 @@ class ESCDFActivity:
         parameters[...] = self.metadata_links
 
         for dataset in self.data:
-            data_group = activity_group.create_group(dataset.name)
             dataset.realize_to_hdf5(
-                data_group,
+                activity_group,
                 strategy=strategy,
                 overwrite=overwrite,
             )
 
         self._hdf5_location = HDF5Location.from_h5_object(activity_group)
         self._has_pending_changes = False
-
-    def write_to_disk(self, activity_groups):
-        """
-        Write the activity to an HDF5 activities group.
-
-        Parameters
-        ----------
-        activity_groups : h5py.Group
-            HDF5 group containing all activities.
-
-        Notes
-        -----
-        Compatibility wrapper around :meth:`realize_to_hdf5`.
-        """
-        self.realize_to_hdf5(activity_groups, strategy="memory", overwrite=False)
 
 
 class ESCDFActivityArray:

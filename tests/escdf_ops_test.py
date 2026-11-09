@@ -610,7 +610,7 @@ def test_activity_write_to_disk_sets_hdf5_native_and_clears_pending_changes(tmp_
     assert activity.hdf5_location is None
     assert activity.has_pending_changes is True
 
-    activity.write_to_disk(activity_group)
+    activity.realize_to_hdf5(activity_group)
 
     assert activity.hdf5_location is not None
     assert activity.has_pending_changes is False

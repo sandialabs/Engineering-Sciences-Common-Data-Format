@@ -1024,7 +1024,7 @@ class ESCDF:
         self.activities[activity_name].add_data(data)
         self._has_pending_changes = True
 
-    def realize_to_hdf5(self, h5_file, strategy="memory", overwrite=False):
+    def realize_to_hdf5(self, h5_file, strategy="auto", overwrite=False):
         """
         Realize the current ESCDF logical graph into an HDF5 file.
 
@@ -1032,7 +1032,7 @@ class ESCDF:
         ----------
         h5_file : h5py.File
             Target HDF5 file handle.
-        strategy : {'memory'}, optional
+        strategy : {'auto','memory'}, optional
             Realization strategy passed to child objects. The first-pass
             implementation supports only ``"memory"``.
         overwrite : bool, optional
@@ -1086,9 +1086,8 @@ class ESCDF:
                     )
                 del h5_file[metadata.name]
 
-            group = h5_file.create_group(metadata.name)
             metadata.realize_to_hdf5(
-                group,
+                h5_file,
                 strategy=strategy,
                 overwrite=overwrite,
             )
@@ -1105,16 +1104,11 @@ class ESCDF:
         activity_group = h5_file.create_group("activities")
 
         for activity in self.activities:
-            if hasattr(activity, "realize_to_hdf5"):
-                activity.realize_to_hdf5(
-                    activity_group,
-                    strategy=strategy,
-                    overwrite=overwrite,
-                )
-            else:
-                # Temporary compatibility until all activity classes expose
-                # realize_to_hdf5.
-                activity.write_to_disk(activity_group)
+            activity.realize_to_hdf5(
+                activity_group,
+                strategy=strategy,
+                overwrite=overwrite,
+            )
 
         self._has_pending_changes = False
         self._hdf5_location = HDF5Location.from_h5_object(h5_file)
@@ -1175,7 +1169,7 @@ class ESCDF:
                 h5_file = h5.File(h5_file, "x")
         return self.realize_to_hdf5(
             h5_file,
-            strategy="memory",
+            strategy="auto",
             overwrite=False,
         )
 

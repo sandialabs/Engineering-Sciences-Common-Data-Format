@@ -1083,27 +1083,54 @@ class ESCDFDataset:
         self._has_pending_changes = False
         return self
 
-    def realize_to_hdf5(self, h5_group, strategy="memory", overwrite=False):
+    def realize_to_hdf5(self, parent_group, strategy="auto", overwrite=False):
         """
-        Realize the dataset into an HDF5 group.
+        Realize the dataset under an HDF5 parent group.
 
         Parameters
         ----------
-        h5_group : h5py.Group
-            HDF5 group representing this dataset in the target file.
-        strategy : {'memory'}, optional
+        parent_group : h5py.Group or h5py.File
+            HDF5 parent under which this dataset group should be realized.
+        strategy : {'auto','memory'}, optional
             Property realization strategy. The first-pass implementation
             supports only ``"memory"``.
         overwrite : bool, optional
-            If ``True``, allow existing target property datasets to be
-            overwritten. The first-pass default is ``False``.
+            If ``True``, allow replacing an existing target dataset group
+            with the same name. The default is ``False``.
+
+        Returns
+        -------
+        h5py.Group
+            HDF5 group representing the realized dataset.
+
+        Raises
+        ------
+        ValueError
+            If the target parent already contains a conflicting dataset
+            group and ``overwrite`` is ``False``.
 
         Notes
         -----
         This method treats the current logical dataset object as
-        authoritative. Present properties are realized into ``h5_group``;
-        absent properties are omitted.
+        authoritative. Present properties are realized into the target
+        dataset group; absent properties are omitted.
         """
+        if self.name in parent_group:
+            h5_group = parent_group[self.name]
+
+            if not self.needs_realization(parent_group):
+                return h5_group
+
+            if not overwrite:
+                raise ValueError(
+                    f'Target HDF5 parent already contains dataset group "{self.name}". '
+                    "Use overwrite=True to replace it explicitly."
+                )
+
+            del parent_group[self.name]
+
+        h5_group = parent_group.create_group(self.name)
+
         for name in self._valid_properties:
             property_ = getattr(self, name)
             if property_ is None:
@@ -1121,20 +1148,7 @@ class ESCDFDataset:
         self._hdf5_location = HDF5Location.from_h5_object(h5_group)
         self._has_pending_changes = False
 
-    def write_to_disk(self, h5_group):
-        """
-        Write the dataset to an HDF5 group.
-
-        Parameters
-        ----------
-        h5_group : h5py.Group
-            HDF5 group representing this dataset in the target file.
-
-        Notes
-        -----
-        Compatibility wrapper around :meth:`realize_to_hdf5`.
-        """
-        self.realize_to_hdf5(h5_group, strategy="memory", overwrite=False)
+        return h5_group
 
     def read_into_memory(self):
         """

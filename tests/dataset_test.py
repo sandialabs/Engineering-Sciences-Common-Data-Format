@@ -343,7 +343,7 @@ def testStorageAndRecall(hdf5_and_properties):
                 np.testing.assert_array_equal(prop[...].view(np.ndarray), data)
 
     hdf5_file = h5py.File(hdf5_file_path, "r+")
-    test_dataset.write_to_disk(hdf5_file)
+    test_dataset.realize_to_hdf5(hdf5_file)
 
     for prop_name, data in zip(property_names, stored_data):
         prop = getattr(test_dataset, prop_name)
@@ -611,8 +611,7 @@ def test_dataset_write_to_disk_sets_hdf5_native_and_clears_pending_changes(
     assert ds.has_pending_changes is True
     assert ds.hdf5_location is None
 
-    group = h5_file.create_group("meta1")
-    ds.write_to_disk(group)
+    group = ds.realize_to_hdf5(h5_file)
 
     assert ds.hdf5_location is not None
     assert ds.has_pending_changes is False
@@ -695,8 +694,7 @@ def test_dataset_realize_to_hdf5_writes_properties_and_attributes(tmp_path):
     assert ds.validate()
 
     with h5py.File(file_path, "w") as h5_file:
-        group = h5_file.create_group("meta1")
-        ds.realize_to_hdf5(group)
+        group = ds.realize_to_hdf5(h5_file)
 
         assert "value" in group
         assert "unit" in group
@@ -790,8 +788,7 @@ def test_dataset_is_realized_at_true_after_realization(tmp_path):
     ds.unit = "g"
 
     with h5py.File(file_path, "w") as h5_file:
-        group = h5_file.create_group("meta1")
-        ds.realize_to_hdf5(group)
+        group = ds.realize_to_hdf5(h5_file)
 
         assert ds.is_realized_at(group)
         assert ds.is_realized_under(h5_file)

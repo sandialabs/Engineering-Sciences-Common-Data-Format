@@ -488,7 +488,7 @@ class ESCDFProperty:
 
         return this_location.same_location_as(other_location)
 
-    def realize_to_hdf5(self, h5_group, strategy="memory", overwrite=False):
+    def realize_to_hdf5(self, h5_group, strategy="auto", overwrite=False):
         """
         Realize the property into an HDF5 group.
 
@@ -496,7 +496,7 @@ class ESCDFProperty:
         ----------
         h5_group : h5py.Group
             HDF5 group into which the property dataset should be realized.
-        strategy : {'memory'}, optional
+        strategy : {'auto','memory'}, optional
             Realization strategy. The first-pass implementation supports
             only ``"memory"``, which materializes HDF5-backed data into
             memory before writing when the current backing is not already
@@ -512,6 +512,8 @@ class ESCDFProperty:
         only when their current backing location already matches the target
         location.
         """
+        if strategy == "auto":
+            strategy = "memory"
         if strategy != "memory":
             raise NotImplementedError(
                 f'Realization strategy "{strategy}" is not implemented.'
@@ -571,21 +573,6 @@ class ESCDFProperty:
             Parent dataset, or ``None`` for a free property.
         """
         self._logical_parent_ref = None if parent is None else weakref.ref(parent)
-
-    def write_to_disk(self, h5_group):
-        """
-        Write the property to an HDF5 group.
-
-        Parameters
-        ----------
-        h5_group : h5py.Group
-            HDF5 group into which the property dataset should be written.
-
-        Notes
-        -----
-        This is a compatibility wrapper around ``realize_to_hdf5``.
-        """
-        self.realize_to_hdf5(h5_group, strategy="memory")
 
     def read_into_memory(self):
         """
