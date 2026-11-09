@@ -1663,5 +1663,63 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             H5F.close(file_id);
         end
 
+        function test_renames_are_realized_in_new_file_without_changing_source(testCase)
+        % Verify logical renames are written to a new target, while the
+        % original HDF5 source retains its old names and links.
+            source_path = fullfile(testCase.temp_folder, 'source_rename.h5');
+            target_path = fullfile(testCase.temp_folder, 'target_rename.h5');
+            when = datetime(2024,1,2,3,4,5,'TimeZone','UTC');
+
+            original = escdf();
+            original.add_metadata(escdf_ops_test.make_minimal_metadata('meta1'));
+            original.add_activity('act1', 'Activity one', when);
+            original.link_activity_to_metadata('act1', 'meta1');
+            original.add_data_to_activity( ...
+                'act1', escdf_ops_test.make_minimal_data('data1'));
+
+            source_id = original.write_to_disk(source_path, true);
+            H5F.close(source_id);
+
+            edited = escdf.load(source_path, true);
+            edited.rename_metadata('meta1', 'meta2');
+            edited.rename_activity_data('act1', 'data1', 'data2');
+
+            target_id = edited.write_to_disk(target_path, true);
+            H5F.close(target_id);
+
+            target_info = h5info(target_path);
+            target_group_names = {target_info.Groups.Name};
+            testCase.verifyTrue(any(strcmp(target_group_names, '/meta2')));
+            testCase.verifyFalse(any(strcmp(target_group_names, '/meta1')));
+
+            target_activity = h5info(target_path, '/activities/act1');
+            target_data_names = {target_activity.Groups.Name};
+            testCase.verifyTrue(any(strcmp( ...
+                target_data_names, '/activities/act1/data2')));
+            testCase.verifyFalse(any(strcmp( ...
+                target_data_names, '/activities/act1/data1')));
+
+            reloaded = escdf.load(target_path, true);
+            testCase.verifyEqual(reloaded.get_metadata_names(), {'meta2'});
+            testCase.verifyEqual( ...
+                reloaded.get_activity('act1').get_metadata_links(), ...
+                {'meta2'});
+            testCase.verifyEqual( ...
+                reloaded.get_activity('act1').get_data_names(), ...
+                {'data2'});
+
+            source_info = h5info(source_path);
+            source_group_names = {source_info.Groups.Name};
+            testCase.verifyTrue(any(strcmp(source_group_names, '/meta1')));
+            testCase.verifyFalse(any(strcmp(source_group_names, '/meta2')));
+
+            source_activity = h5info(source_path, '/activities/act1');
+            source_data_names = {source_activity.Groups.Name};
+            testCase.verifyTrue(any(strcmp( ...
+                source_data_names, '/activities/act1/data1')));
+            testCase.verifyFalse(any(strcmp( ...
+                source_data_names, '/activities/act1/data2')));
+        end
+
     end
 end

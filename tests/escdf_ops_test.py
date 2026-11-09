@@ -1798,3 +1798,56 @@ def test_container_needs_realization_true_after_metadata_rename(tmp_path, monkey
 
     with h5py.File(file_path, "r") as h5_file:
         assert loaded.needs_realization(h5_file)
+
+
+def test_renames_are_realized_in_new_file_without_changing_source(
+    tmp_path, monkeypatch
+):
+    """
+    Verify that logical renames and updated metadata links are persisted
+    in a new target without renaming objects in the source file.
+    """
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    source_path = tmp_path / "source.h5"
+    target_path = tmp_path / "renamed.h5"
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+
+    original = escdf.ESCDF()
+    original.add_metadata(make_minimal_metadata("meta1"))
+    original.add_activity("act1", "Activity one", when)
+    original.link_activity_to_metadata("act1", "meta1")
+    original.add_data_to_activity("act1", make_minimal_data("data1"))
+
+    # Current write_to_disk returns an open handle: close it explicitly.
+    original.write_to_disk(str(source_path)).close()
+
+    edited = escdf.ESCDF.load(str(source_path), readonly=True)
+    edited.rename_metadata("meta1", "meta2")
+    edited.rename_activity_data("act1", "data1", "data2")
+
+    edited.write_to_disk(str(target_path)).close()
+
+    # Check the physical HDF5 structure, not just the edited object graph.
+    with h5py.File(target_path, "r") as target:
+        assert "meta2" in target
+        assert "meta1" not in target
+        assert "data2" in target["activities"]["act1"]
+        assert "data1" not in target["activities"]["act1"]
+
+    reloaded = escdf.ESCDF.load(str(target_path), readonly=True)
+    assert reloaded.metadata.names == ["meta2"]
+    assert reloaded.activities["act1"].metadata_links == ["meta2"]
+    assert reloaded.activities["act1"].data_names == ["data2"]
+    assert reloaded.activities["act1"]["data2"].value[...] == 1.25
+
+    # Writing the target must not have renamed anything in the source.
+    with h5py.File(source_path, "r") as source:
+        assert "meta1" in source
+        assert "meta2" not in source
+        assert "data1" in source["activities"]["act1"]
+        assert "data2" not in source["activities"]["act1"]
