@@ -946,6 +946,7 @@ classdef escdf < handle
                 dataset_path = H5I.get_name(source_dataset_id);
                 file_id = H5I.get_file_id(source_dataset_id);
                 cloned_dataset_id = H5D.open(file_id, dataset_path);
+                H5F.close(file_id);
 
                 cloned = escdf_property.load(cloned_dataset_id);
                 return

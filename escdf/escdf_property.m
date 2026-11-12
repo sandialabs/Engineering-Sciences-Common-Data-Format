@@ -1086,6 +1086,7 @@ classdef escdf_property < handle
                 end
                 file_id = H5F.open(file_path,read_flag,'H5P_DEFAULT');
                 dataset_id = H5D.open(file_id, internal_path);
+                H5F.close(file_id);
             else
                 dataset_id = hdf5_path_or_id;
                 if ~escdf_property.check_hdf5_dataset(dataset_id)
@@ -1141,6 +1142,7 @@ classdef escdf_property < handle
                 end
                 ragged = false;
             end
+            H5T.close(datatype_id);
             % Now create the dataset
             obj = escdf_property(name,data_type,dims,'ragged',ragged);
             obj.inmemory = false;
