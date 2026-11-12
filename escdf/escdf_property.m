@@ -1099,6 +1099,50 @@ classdef escdf_property < handle
                     fn_handle = missing;
             end
         end
+        
+        function rebind_hdf5_dataset_id(obj, dataset_id)
+        % Rebind this property to a newly opened HDF5 dataset ID.
+        %
+        % Parameters
+        % ----------
+        % dataset_id : numeric
+        %     Newly opened HDF5 dataset ID. On success, this property
+        %     assumes responsibility for closing the ID.
+        %
+        % Raises
+        % ------
+        % error
+        %     Raised if the property is memory-backed, its old dataset ID
+        %     is still open, or the new ID identifies the wrong dataset.
+        %
+        % Notes
+        % -----
+        % This method changes the access ID on the existing property
+        % handle. It does not replace the property object or its parent.
+            if obj.inmemory
+                error('escdf_property:CannotRebindMemoryProperty', ...
+                    'Property "%s" is still in memory.', obj.name);
+            end
+
+            if ~obj.is_closed()
+                error('escdf_property:OpenHDF5Dataset', ...
+                    'Property "%s" still has an open HDF5 dataset ID.', ...
+                    obj.name);
+            end
+
+            new_location = HDF5Location.from_hdf5_id(dataset_id);
+            logical_path = obj.get_logical_path();
+
+            if isempty(logical_path) || ...
+                    ~strcmp(new_location.object_path, logical_path)
+                error('escdf_property:RebindLocationMismatch', ...
+                    ['Dataset ID for property "%s" does not match ', ...
+                     'its logical HDF5 path.'], obj.name);
+            end
+
+            obj.h5d_id = dataset_id;
+        end
+
     end
 
     methods (Static)

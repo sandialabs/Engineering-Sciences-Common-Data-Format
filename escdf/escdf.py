@@ -1169,7 +1169,73 @@ class ESCDF:
                 "this ESCDF object graph. Write to a different path."
             )
 
-    def write_to_disk(self, file_path, clobber=False):
+    def _rebind_properties_to_hdf5_file(self, h5_file):
+        """
+        Rebind existing property wrappers to datasets in an open HDF5 file.
+
+        Parameters
+        ----------
+        h5_file : h5py.File
+            Completed file reopened in read/write mode.
+
+        Raises
+        ------
+        RuntimeError
+            If a present property was not realized or its expected HDF5
+            dataset is missing from the reopened file.
+
+        Notes
+        -----
+        All replacement datasets are checked before any property wrapper
+        is rebound. Dataset, activity, property, and container wrapper
+        identities remain unchanged.
+        """
+        replacements = []
+
+        datasets = list(self.metadata)
+        for activity in self.activities:
+            datasets.extend(activity.data)
+
+        for dataset in datasets:
+            for property_name in dataset.property_names:
+                prop = getattr(dataset, property_name, None)
+                if prop is None:
+                    continue
+
+                logical_path = prop.logical_path
+                if logical_path is None or logical_path not in h5_file:
+                    raise RuntimeError(
+                        f'Cannot rebind property "{property_name}": '
+                        f'expected dataset "{logical_path}" is missing.'
+                    )
+
+                target_dataset = h5_file[logical_path]
+                if not isinstance(target_dataset, h5.Dataset):
+                    raise RuntimeError(
+                        f'Cannot rebind property "{property_name}": '
+                        f'"{logical_path}" is not an HDF5 dataset.'
+                    )
+
+                if not target_dataset.id.valid:
+                    raise RuntimeError(
+                        f'Cannot rebind property "{property_name}": '
+                        f'"{logical_path}" is not open.'
+                    )
+
+                if prop._data is not None:
+                    raise RuntimeError(
+                        f'Cannot rebind property "{property_name}": '
+                        "it still has an in-memory payload."
+                    )
+
+                replacements.append((prop, target_dataset))
+
+        # Do not modify any wrapper until the entire graph has passed
+        # the checks above.
+        for prop, target_dataset in replacements:
+            prop._h5_dataset = target_dataset
+
+    def write_to_disk(self, file_path, clobber=False, keep_open=False):
         """
         Write a complete ESCDF file and close its writer before returning.
 
@@ -1181,11 +1247,17 @@ class ESCDF:
             If ``True``, replace an existing output file unless that file
             currently backs this object graph. If ``False``, require that
             the output file not already exist.
+        keep_open : bool, optional
+            If ``True``, close the completed writer, reopen the output in
+            read/write mode, and rebind existing property wrappers to the
+            reopened datasets. The default is ``False``.
 
         Returns
         -------
-        None
-            The output file opened by this method is closed before return.
+        h5py.File or None
+            An open, writable HDF5 file when ``keep_open`` is ``True``; the caller
+            is responsible for closing it. Otherwise ``None``, with the output
+            writer closed before return.
 
         Raises
         ------
@@ -1221,18 +1293,27 @@ class ESCDF:
                     )
 
         file_path = os.fspath(file_path)
+
+        # Must happen before h5.File(..., "w") can truncate the source.
         self._assert_safe_write_target(file_path, clobber)
 
         mode = "w" if clobber else "x"
         with h5.File(file_path, mode) as target:
-            self.realize_to_hdf5(
-                target,
-                strategy="auto",
-                overwrite=False,
-            )
+            self.realize_to_hdf5(target, strategy="auto", overwrite=False)
             target.flush()
 
-        return None
+        if not keep_open:
+            return None
+
+        reopened = h5.File(file_path, "r+")
+        try:
+            self._rebind_properties_to_hdf5_file(reopened)
+        except Exception:
+            reopened.close()
+            raise
+
+        self._mutability_state = "editable"
+        return reopened
 
     @classmethod
     def load(cls, h5_file, readonly=True):

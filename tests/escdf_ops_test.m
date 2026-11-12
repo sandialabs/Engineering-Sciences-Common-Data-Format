@@ -1778,5 +1778,132 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             testCase.verifyEqual(char(stored_value), char(expected_value{1}));
         end
 
+        function test_write_to_disk_keep_open_rebinds_existing_handles_for_writing(testCase)
+        % Verify that keep_open returns a writable file ID and rebinds
+        % existing ESCDF handles rather than replacing the logical graph.
+            outfile = fullfile(testCase.temp_folder, 'rebind_writable.h5');
+            when = datetime(2024, 1, 2, 3, 4, 5, 'TimeZone', 'UTC');
+
+            f = escdf();
+            f.add_metadata(escdf_ops_test.make_minimal_metadata('meta1'));
+            f.add_activity('act1', 'Activity one', when);
+            f.add_data_to_activity( ...
+                'act1', escdf_ops_test.make_minimal_data('data1'));
+
+            metadata = f.get_metadata('meta1');
+            metadata_property = metadata.test_name;
+            activity = f.get_activity('act1');
+            data = f.get_activity_data('act1', 'data1');
+            data_property = data.value;
+
+            file_id = f.write_to_disk(outfile, true, true);
+            file_cleanup = onCleanup(@() H5F.close(file_id)); %#ok<NASGU>
+
+            % A valid returned file ID is part of the keep_open contract.
+            testCase.verifyEqual( ...
+                HDF5Location.normalize_file_path(H5F.get_name(file_id)), ...
+                HDF5Location.normalize_file_path(outfile));
+
+            % The ESCDF wrappers held before writing must still be the
+            % exact same MATLAB handle objects.
+            testCase.verifySameHandle(f.get_metadata('meta1'), metadata);
+            testCase.verifySameHandle(metadata.test_name, metadata_property);
+            testCase.verifySameHandle(f.get_activity('act1'), activity);
+            testCase.verifySameHandle( ...
+                f.get_activity_data('act1', 'data1'), data);
+            testCase.verifySameHandle(data.value, data_property);
+
+            testCase.verifyFalse(metadata_property.is_closed());
+            testCase.verifyFalse(data_property.is_closed());
+            testCase.verifyEqual(f.get_mutability_state(), 'editable');
+
+            % Write through aliases obtained BEFORE write_to_disk.
+            metadata_property(:) = {'Updated Test Name'};
+            data_property(:) = single(2.5);
+
+            testCase.verifyFalse(metadata_property.isinmemory());
+            testCase.verifyFalse(data_property.isinmemory());
+            testCase.verifyEqual( ...
+                metadata_property(:), {'Updated Test Name'});
+            testCase.verifyEqual(double(data_property(:)), 2.5);
+
+            target_location = f.get_hdf5_location();
+            testCase.verifyTrue( ...
+                metadata_property.get_hdf5_location().same_file_as( ...
+                    target_location));
+            testCase.verifyTrue( ...
+                data_property.get_hdf5_location().same_file_as( ...
+                    target_location));
+
+            % Flush the continuing writable session before observing
+            % its changes through an independent read.
+            H5F.flush(file_id, 'H5F_SCOPE_GLOBAL');
+
+            stored_name = h5read(outfile, '/meta1/test_name');
+            stored_value = h5read( ...
+                outfile, '/activities/act1/data1/value');
+
+            testCase.verifyEqual( ...
+                char(stored_name), 'Updated Test Name');
+            testCase.verifyEqual(double(stored_value), 2.5);
+        end
+
+        function test_write_to_disk_keep_open_rebinds_readonly_source_to_writable_target(testCase)
+        % Verify that writing a new target from a read-only source
+        % preserves wrapper identity and never writes back to the source.
+            source_path = fullfile( ...
+                testCase.temp_folder, 'readonly_source.h5');
+            target_path = fullfile( ...
+                testCase.temp_folder, 'writable_target.h5');
+
+            source_writer = escdf();
+            source_writer.add_metadata( ...
+                escdf_ops_test.make_minimal_metadata('meta1'));
+            source_writer.write_to_disk(source_path, true);
+
+            loaded = escdf.load(source_path, true);
+            metadata = loaded.get_metadata('meta1');
+            prop = metadata.test_name;
+
+            testCase.verifyEqual( ...
+                prop(:), {'test program name'});
+            testCase.verifyEqual( ...
+                loaded.get_mutability_state(), 'read_only');
+
+            file_id = loaded.write_to_disk(target_path, true, true);
+            file_cleanup = onCleanup(@() H5F.close(file_id)); %#ok<NASGU>
+
+            testCase.verifyEqual( ...
+                HDF5Location.normalize_file_path(H5F.get_name(file_id)), ...
+                HDF5Location.normalize_file_path(target_path));
+
+            testCase.verifySameHandle( ...
+                loaded.get_metadata('meta1'), metadata);
+            testCase.verifySameHandle(metadata.test_name, prop);
+            testCase.verifyFalse(prop.is_closed());
+            testCase.verifyEqual( ...
+                loaded.get_mutability_state(), 'editable');
+
+            % Assignment through the old alias must now update the
+            % writable TARGET, not its read-only source.
+            prop(:) = {'Changed In Target'};
+
+            testCase.verifyFalse(prop.isinmemory());
+            testCase.verifyEqual(prop(:), {'Changed In Target'});
+            testCase.verifyTrue( ...
+                prop.get_hdf5_location().same_file_as( ...
+                    loaded.get_hdf5_location()));
+
+            H5F.flush(file_id, 'H5F_SCOPE_GLOBAL');
+
+            source_value = h5read(source_path, '/meta1/test_name');
+            target_value = h5read(target_path, '/meta1/test_name');
+
+            testCase.verifyEqual( ...
+                char(source_value), 'test program name');
+            testCase.verifyEqual( ...
+                char(target_value), 'Changed In Target');
+        end
+
     end
 end

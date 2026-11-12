@@ -1184,7 +1184,8 @@ classdef escdf < handle
             obj.hdf5_location = HDF5Location.from_hdf5_id(file_id);
         end
 
-        function write_to_disk(obj, file_path, clobber)
+        function file_id = write_to_disk( ...
+                obj, file_path, clobber, keep_open)
         % Write a complete ESCDF file and close it before returning.
         %
         % Parameters
@@ -1194,11 +1195,16 @@ classdef escdf < handle
         % clobber : logical, optional
         %     If true, replace an existing destination unless that file
         %     currently backs this object graph.
+        % keep_open : logical, optional
+        %     If true, close the completed writer, reopen the output in
+        %     read/write mode, rebind existing property handles, and
+        %     return the reopened file ID. Defaults to false.
         %
         % Returns
         % -------
-        % None
-        %     The output file is closed before the method returns.
+        % file_id : numeric or []
+        %     Reopened writable file ID when keep_open is true; the caller
+        %     is responsible for closing it. Empty otherwise.
         %
         % Raises
         % ------
@@ -1214,6 +1220,9 @@ classdef escdf < handle
         % HDF5 dataset ID. Reload the file to continue using its data.
             if nargin < 3
                 clobber = false;
+            end
+            if nargin < 4
+                keep_open = false;
             end
             file_path = char(string(file_path));
 
@@ -1274,8 +1283,27 @@ classdef escdf < handle
                 rethrow(ME)
             end
 
-            % file_cleanup closes file_id at method exit. Do not return
-            % the ID or close it a second time.
+            % Clearing the onCleanup object explicitly closes the
+            % original writer before we consider reopening the file.
+            clear file_cleanup
+
+            if ~keep_open
+                file_id = [];
+                return
+            end
+
+            reopened_id = H5F.open( ...
+                file_path, 'H5F_ACC_RDWR', 'H5P_DEFAULT');
+
+            try
+                obj.rebind_target_property_ids(reopened_id);
+            catch ME
+                H5F.close(reopened_id);
+                rethrow(ME)
+            end
+
+            obj.mutability_state = 'editable';
+            file_id = reopened_id;
         end
 
         function varargout = subsref(obj, S)
@@ -1373,6 +1401,82 @@ classdef escdf < handle
                         result{end+1} = candidate; %#ok<AGROW>
                     end
                 end
+            end
+        end
+
+        function rebind_target_property_ids(obj, file_id)
+        % Rebind existing property handles to a reopened target file.
+        %
+        % Parameters
+        % ----------
+        % file_id : numeric
+        %     Target file ID reopened with H5F_ACC_RDWR.
+        %
+        % Raises
+        % ------
+        % error
+        %     Raised if a logical property is missing from the target or
+        %     cannot be rebound.
+        %
+        % Notes
+        % -----
+        % All new dataset IDs are opened and checked before any property
+        % handle is modified. This preserves wrapper identity and avoids
+        % a partially rebound graph for expected lookup failures.
+            property_objects = obj.get_all_property_objects();
+            new_ids = cell(1, numel(property_objects));
+            target = HDF5Location.from_hdf5_id(file_id);
+
+            try
+                % Phase 1: acquire and verify all replacement IDs.
+                for i = 1:numel(property_objects)
+                    prop = property_objects{i};
+
+                    if prop.isinmemory() || ~prop.is_closed()
+                        error('escdf:CannotRebindProperty', ...
+                            ['Property "%s" is not a closed, ', ...
+                             'HDF5-backed target property.'], ...
+                            prop.get_name());
+                    end
+
+                    logical_path = prop.get_logical_path();
+                    if isempty(logical_path)
+                        error('escdf:CannotRebindProperty', ...
+                            'Property "%s" has no logical HDF5 path.', ...
+                            prop.get_name());
+                    end
+
+                    new_ids{i} = H5D.open(file_id, logical_path);
+                    location = HDF5Location.from_hdf5_id(new_ids{i});
+
+                    if ~location.same_file_as(target) || ...
+                            ~strcmp(location.object_path, logical_path)
+                        error('escdf:CannotRebindProperty', ...
+                            'Property "%s" resolved to the wrong target.', ...
+                            prop.get_name());
+                    end
+                end
+
+                % Phase 2: change existing property handles in place.
+                for i = 1:numel(property_objects)
+                    property_objects{i}.rebind_hdf5_dataset_id( ...
+                        new_ids{i});
+                    new_ids{i} = [];  % ID is now owned by the property.
+                end
+
+            catch ME
+                % Close only IDs still owned by this helper. Do not close
+                % IDs successfully transferred to property objects.
+                for i = 1:numel(new_ids)
+                    if ~isempty(new_ids{i})
+                        try
+                            H5D.close(new_ids{i});
+                        catch
+                            % Preserve the original rebinding error.
+                        end
+                    end
+                end
+                rethrow(ME)
             end
         end
 

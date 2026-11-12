@@ -1910,3 +1910,234 @@ def test_write_to_disk_rejects_clobbering_its_backing_source(tmp_path, monkeypat
     # Preflight failure must leave the source usable and unchanged.
     assert not source_prop.is_closed
     assert source_prop[...] == expected
+
+
+def test_write_to_disk_keep_open_rebinds_existing_wrappers(tmp_path, monkeypatch):
+    """
+    Verify that keep_open closes the writer, then rebinds the same ESCDF
+    wrappers to a newly opened copy of the completed file.
+    """
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    path = tmp_path / "rebind.h5"
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+
+    f = escdf.ESCDF()
+    f.add_metadata(make_minimal_metadata("meta1"))
+    f.add_activity("act1", "Activity one", when)
+    f.add_data_to_activity("act1", make_minimal_data("data1"))
+
+    metadata = f.metadata["meta1"]
+    metadata_property = metadata.test_name
+    activity = f.activities["act1"]
+    data = activity["data1"]
+    data_property = data.value
+
+    result = f.write_to_disk(path, keep_open=True)
+
+    assert isinstance(result, h5py.File)
+    assert result.id.valid
+    assert result.mode == "r+"
+
+    # Reopening must rebind existing wrappers, not reconstruct the graph.
+    assert f.metadata["meta1"] is metadata
+    assert metadata.test_name is metadata_property
+    assert f.activities["act1"] is activity
+    assert activity["data1"] is data
+    assert data.value is data_property
+
+    # Both property handles must be usable after rebinding.
+    assert not metadata_property.is_closed
+    assert not data_property.is_closed
+    assert metadata_property[...] == "test program name"
+    assert data_property[...] == 1.25
+
+    assert metadata_property.hdf5_location.file_path == f.hdf5_location.file_path
+    assert data_property.hdf5_location.file_path == f.hdf5_location.file_path
+    assert metadata_property.hdf5_location.object_path == "/meta1/test_name"
+    assert data_property.hdf5_location.object_path == "/activities/act1/data1/value"
+
+    # The writer must have completed a file that another handle can read.
+    with h5py.File(path, "r") as independently_opened:
+        assert "meta1" in independently_opened
+        assert "data1" in independently_opened["activities"]["act1"]
+
+
+def test_write_to_disk_keep_open_rebinds_from_source_to_new_target(
+    tmp_path, monkeypatch
+):
+    """
+    Verify that aliases to source-backed objects are rebound to a new
+    target without changing the source file or replacing ESCDF wrappers.
+    """
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    source_path = tmp_path / "source.h5"
+    target_path = tmp_path / "target.h5"
+
+    source_writer = escdf.ESCDF()
+    source_writer.add_metadata(make_minimal_metadata("meta1"))
+    source_writer.write_to_disk(source_path)
+
+    loaded = escdf.ESCDF.load(str(source_path), readonly=True)
+    metadata = loaded.metadata["meta1"]
+    prop = metadata.test_name
+    original_value = prop[...]
+
+    result = loaded.write_to_disk(target_path, keep_open=True)
+
+    assert isinstance(result, h5py.File)
+    assert result.id.valid
+    assert result.mode == "r+"
+    assert loaded.metadata["meta1"] is metadata
+    assert metadata.test_name is prop
+    assert not prop.is_closed
+    assert prop[...] == original_value
+
+    # The existing wrapper should now access the completed target.
+    assert prop.hdf5_location.file_path == loaded.hdf5_location.file_path
+    assert prop.hdf5_location.object_path == "/meta1/test_name"
+
+    with h5py.File(source_path, "r") as source:
+        value = source["meta1"]["test_name"][()]
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        assert value == original_value
+
+    with h5py.File(target_path, "r") as target:
+        value = target["meta1"]["test_name"][()]
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        assert value == original_value
+
+
+def test_write_to_disk_keep_open_rebinds_existing_wrappers_for_writing(
+    tmp_path, monkeypatch
+):
+    """
+    Verify that keep_open preserves wrapper identity and permits writes
+    through existing property aliases into the completed output file.
+    """
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    path = tmp_path / "rebind_writable.h5"
+    when = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+
+    f = escdf.ESCDF()
+    f.add_metadata(make_minimal_metadata("meta1"))
+    f.add_activity("act1", "Activity one", when)
+    f.add_data_to_activity("act1", make_minimal_data("data1"))
+
+    metadata = f.metadata["meta1"]
+    metadata_property = metadata.test_name
+    activity = f.activities["act1"]
+    data = activity["data1"]
+    data_property = data.value
+
+    result = f.write_to_disk(path, keep_open=True)
+
+    assert isinstance(result, h5py.File)
+    assert result.id.valid
+    assert result.mode == "r+"
+
+    # Rebinding must update the existing wrappers, not replace them.
+    assert f.metadata["meta1"] is metadata
+    assert metadata.test_name is metadata_property
+    assert f.activities["act1"] is activity
+    assert activity["data1"] is data
+    assert data.value is data_property
+
+    assert not metadata_property.is_closed
+    assert not data_property.is_closed
+    assert metadata_property.h5_dataset.file.mode == "r+"
+    assert data_property.h5_dataset.file.mode == "r+"
+    assert f.mutability_state == "editable"
+
+    # The existing aliases must write through to the reopened target.
+    metadata_property[...] = "Updated Test Name"
+    data_property[...] = 2.5
+
+    assert not metadata_property.in_memory
+    assert not data_property.in_memory
+    assert metadata_property[...] == "Updated Test Name"
+    assert data_property[...] == 2.5
+
+    # Make the independent read explicit while the writable session is open.
+    metadata_property.h5_dataset.file.flush()
+
+    with h5py.File(path, "r") as independently_opened:
+        stored_name = independently_opened["meta1"]["test_name"][()]
+        if isinstance(stored_name, bytes):
+            stored_name = stored_name.decode("utf-8")
+
+        assert stored_name == "Updated Test Name"
+        assert independently_opened["activities"]["act1"]["data1"]["value"][()] == 2.5
+
+
+def test_write_to_disk_keep_open_rebinds_readonly_source_to_writable_target(
+    tmp_path, monkeypatch
+):
+    """
+    Verify that keep_open permits writes to a new target without changing
+    the file from which the object's properties were loaded.
+    """
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    source_path = tmp_path / "source.h5"
+    target_path = tmp_path / "writable_target.h5"
+
+    source_writer = escdf.ESCDF()
+    source_writer.add_metadata(make_minimal_metadata("meta1"))
+    source_writer.write_to_disk(source_path)
+
+    loaded = escdf.ESCDF.load(str(source_path), readonly=True)
+    metadata = loaded.metadata["meta1"]
+    prop = metadata.test_name
+
+    assert prop[...] == "test program name"
+    assert loaded.mutability_state == "read_only"
+
+    result = loaded.write_to_disk(target_path, keep_open=True)
+
+    assert isinstance(result, h5py.File)
+    assert result.id.valid
+    assert result.mode == "r+"
+    assert loaded.metadata["meta1"] is metadata
+    assert metadata.test_name is prop
+    assert not prop.is_closed
+    assert prop.h5_dataset.file.mode == "r+"
+    assert loaded.mutability_state == "editable"
+
+    # This assignment must affect the new target, not the read-only source.
+    prop[...] = "Changed In Target"
+    assert not prop.in_memory
+    assert prop[...] == "Changed In Target"
+    prop.h5_dataset.file.flush()
+
+    with h5py.File(source_path, "r") as source:
+        source_value = source["meta1"]["test_name"][()]
+        if isinstance(source_value, bytes):
+            source_value = source_value.decode("utf-8")
+        assert source_value == "test program name"
+
+    with h5py.File(target_path, "r") as target:
+        target_value = target["meta1"]["test_name"][()]
+        if isinstance(target_value, bytes):
+            target_value = target_value.decode("utf-8")
+        assert target_value == "Changed In Target"
