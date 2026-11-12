@@ -166,5 +166,77 @@ classdef hdf5_resource_lifetime_test < matlab.unittest.TestCase
             testCase.verifyTrue( ...
                 container.get_metadata('meta1').value.is_closed());
         end
+
+        function test_property_realization_conflict_leaves_resources_unchanged(testCase)
+        % A target-name conflict must not leak IDs, mutate the property,
+        % or replace the existing target dataset.
+            path = fullfile(testCase.temp_folder, 'property_conflict.h5');
+            file_id = H5F.create( ...
+                path, 'H5F_ACC_TRUNC', ...
+                'H5P_DEFAULT', 'H5P_DEFAULT');
+            file_cleanup = onCleanup(@() H5F.close(file_id)); %#ok<NASGU>
+
+            % Create and close an existing target dataset.
+            existing = escdf_property('p1', 'f8', [3], ...
+                'hdf5groupid', file_id);
+            % This standalone disk-backed property has no logical parent;
+            % write the fixture through the HDF5 ID explicitly.
+            H5D.write(existing.get_h5d_id(), 'H5T_IEEE_F64LE', ...
+                'H5S_ALL', 'H5S_ALL', 'H5P_DEFAULT', [4.0; 5.0; 6.0]);
+            delete(existing);
+
+            candidate = escdf_property('p1', 'f8', [3]);
+            candidate(:) = [1.0; 2.0; 3.0];
+
+            baseline = H5F.get_obj_count(file_id, 'H5F_OBJ_ALL');
+
+            did_error = false;
+            try
+                candidate.realize_to_hdf5(file_id, 'memory', false);
+            catch ME
+                did_error = true;
+                testCase.verifyTrue(contains(ME.message, 'already contains dataset'));
+            end
+            testCase.verifyTrue(did_error);
+
+            hdf5_resource_lifetime_test.assert_open_count( ...
+                testCase, file_id, baseline);
+            testCase.verifyTrue(candidate.isinmemory());
+            testCase.verifyEqual(candidate(:), [1.0; 2.0; 3.0]);
+
+            dataset_id = H5D.open(file_id, 'p1');
+            dataset_cleanup = onCleanup( ...
+                @() H5D.close(dataset_id)); %#ok<NASGU>
+            testCase.verifyEqual( ...
+                H5D.read(dataset_id), [4.0; 5.0; 6.0]);
+        end
+
+        function test_property_realization_at_same_target_opens_no_new_ids(testCase)
+        % Calling realization again at the same target is a no-op and
+        % must not create another dataset ID.
+            path = fullfile(testCase.temp_folder, 'property_idempotent.h5');
+            file_id = H5F.create( ...
+                path, 'H5F_ACC_TRUNC', ...
+                'H5P_DEFAULT', 'H5P_DEFAULT');
+            file_cleanup = onCleanup(@() H5F.close(file_id)); %#ok<NASGU>
+
+            baseline = H5F.get_obj_count(file_id, 'H5F_OBJ_ALL');
+
+            prop = escdf_property('p1', 'f8', [3]);
+            prop(:) = [1.0; 2.0; 3.0];
+            prop.realize_to_hdf5(file_id);
+
+            with_property = H5F.get_obj_count(file_id, 'H5F_OBJ_ALL');
+            testCase.verifyEqual(with_property, baseline + 1);
+
+            prop.realize_to_hdf5(file_id);
+            hdf5_resource_lifetime_test.assert_open_count( ...
+                testCase, file_id, with_property);
+
+            delete(prop);
+            hdf5_resource_lifetime_test.assert_open_count( ...
+                testCase, file_id, baseline);
+        end
+
     end
 end
