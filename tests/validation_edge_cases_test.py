@@ -24,7 +24,15 @@ GROUP_CONSTRAINT_CASES = (
     ("at_least_one_of", ("a", "b"), True),
     ("at_least_one_of", ("a", "b", "c"), True),
 )
-
+MALFORMED_GROUP_RULES = (
+    "unknown_rule: a, b",
+    "paired: a, b",
+    "all_or_none a, b",
+    "all_or_none: a",
+    "all_or_none: a, a",
+    "all_or_none: a, , c",
+    "all_or_none: a, b,",
+)
 
 @pytest.fixture
 def validation_specs(tmp_path):
@@ -598,3 +606,175 @@ def test_exactly_one_accepts_each_individual_property(validation_specs, single_n
     setattr(ds, single_name, 1.0)
 
     assert ds.validate(hide_issues=True) is True
+
+
+def _constraint_spec_text(
+    name, *,
+    extends="none",
+    properties=("a - f8 - scalar - optional",
+                "b - f8 - scalar - optional"),
+    constraints=("all_or_none: a, b",),
+):
+    """Build a small test-only specification."""
+    return (
+        f"{name} - v0.1.0\n"
+        "----------------------\n"
+        f"extends: {extends}\n\n"
+        "properties\n"
+        "----------\n"
+        + "\n".join(properties)
+        + "\n\nconstraints\n-----------\n"
+        + "\n".join(constraints)
+        + "\n"
+    )
+
+
+@pytest.mark.parametrize("rule_line", MALFORMED_GROUP_RULES)
+def test_rejects_malformed_group_constraint_lines(tmp_path, rule_line):
+    """Reject unsupported kinds and malformed section rules."""
+    from escdf.model import SpecificationParser
+
+    path = tmp_path / "malformed_constraint.txt"
+    path.write_text(
+        _constraint_spec_text(
+            "malformed_constraint", constraints=(rule_line,)
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError):
+        SpecificationParser.parse_file(str(path))
+
+
+def test_paired_is_not_a_supported_constraint_kind():
+    """Do not accept a rule kind for which no validator exists."""
+    from escdf.model import ConstraintRule
+
+    with pytest.raises(ValueError):
+        ConstraintRule(
+            kind="paired",
+            subject_properties=["a", "b"],
+            target_properties=[],
+        )
+
+
+def test_group_rule_can_reference_inherited_property(tmp_path):
+    """Resolve group-rule names against inherited as well as local fields."""
+    from escdf.model import SpecificationRegistry
+
+    (tmp_path / "contract_parent.txt").write_text(
+        "contract_parent - v0.1.0\n"
+        "----------------------\n"
+        "extends: none\n\n"
+        "properties\n----------\n"
+        "a - f8 - scalar - optional\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "contract_child.txt").write_text(
+        _constraint_spec_text(
+            "contract_child",
+            extends="contract_parent",
+            properties=("b - f8 - scalar - optional",),
+        ),
+        encoding="utf-8",
+    )
+
+    registry = SpecificationRegistry()
+    registry.load_from_directory(str(tmp_path))
+    resolved = registry.resolve("contract_child")
+
+    assert resolved.ancestry == ["contract_parent", "contract_child"]
+    assert resolved.constraints[0].subject_properties == ["a", "b"]
+
+
+def test_group_rule_rejects_unknown_property_after_resolution(tmp_path):
+    """An unresolved name must fail rather than become a no-op rule."""
+    from escdf.model import SpecificationRegistry
+
+    path = tmp_path / "unknown_constraint_name.txt"
+    path.write_text(
+        _constraint_spec_text(
+            "unknown_constraint_name",
+            constraints=("all_or_none: a, nonexistent",),
+        ),
+        encoding="utf-8",
+    )
+
+    registry = SpecificationRegistry()
+    registry.load_from_directory(str(tmp_path))
+
+    with pytest.raises(ValueError, match="nonexistent"):
+        registry.resolve("unknown_constraint_name")
+
+
+@pytest.mark.parametrize(
+    "choice_in_parent",
+    (False, True),
+    ids=("local-choice", "inherited-choice"),
+)
+def test_choice_and_constraints_cannot_coexist(
+    tmp_path, choice_in_parent
+):
+    """Reject choices and relational rules together in the resolved spec."""
+    from escdf.model import SpecificationRegistry
+
+    choice_properties = (
+        "a - f8 - scalar - or:mode:first",
+        "b - f8 - scalar - or:mode:second",
+    )
+
+    if choice_in_parent:
+        (tmp_path / "choice_parent.txt").write_text(
+            "choice_parent - v0.1.0\n"
+            "----------------------\n"
+            "extends: none\n\n"
+            "properties\n----------\n"
+            + "\n".join(choice_properties)
+            + "\n",
+            encoding="utf-8",
+        )
+        name = "constraint_child"
+        text = _constraint_spec_text(
+            name,
+            extends="choice_parent",
+            properties=("c - f8 - scalar - optional",),
+            constraints=("at_least_one_of: a, c",),
+        )
+    else:
+        name = "choice_and_constraint"
+        text = _constraint_spec_text(
+            name,
+            properties=choice_properties,
+            constraints=("at_least_one_of: a, b",),
+        )
+
+    (tmp_path / f"{name}.txt").write_text(text, encoding="utf-8")
+
+    registry = SpecificationRegistry()
+    registry.load_from_directory(str(tmp_path))
+
+    with pytest.raises(ValueError, match=r"(?i)choice.*constraint|constraint.*choice"):
+        registry.resolve(name)
+
+
+def test_inline_requires_and_choice_cannot_coexist(tmp_path):
+    """The exclusion also covers property-authored relational rules."""
+    from escdf.model import SpecificationRegistry
+
+    path = tmp_path / "choice_and_requires.txt"
+    path.write_text(
+        "choice_and_requires - v0.1.0\n"
+        "---------------------------\n"
+        "extends: none\n\n"
+        "properties\n----------\n"
+        "a - f8 - scalar - or:mode:first,requires:c\n"
+        "b - f8 - scalar - or:mode:second\n"
+        "c - f8 - scalar - optional\n",
+        encoding="utf-8",
+    )
+
+    registry = SpecificationRegistry()
+    registry.load_from_directory(str(tmp_path))
+
+    with pytest.raises(ValueError, match=r"(?i)choice.*constraint|constraint.*choice"):
+        registry.resolve("choice_and_requires")

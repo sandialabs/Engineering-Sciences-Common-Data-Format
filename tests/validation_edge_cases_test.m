@@ -237,6 +237,44 @@ classdef validation_edge_cases_test < matlab.unittest.TestCase
             fprintf(fid, '%s: a, b, c\n', kind);
         end
 
+        function write_constraint_contract_spec( ...
+                file_path, spec_name, parent_name, property_lines, rule_lines)
+        % Write a temporary specification for constraint contract tests.
+        %
+        % Parameters
+        % ----------
+        % file_path : char
+        %     Destination in the test's temporary specification folder.
+        % spec_name : char
+        %     Specification name.
+        % parent_name : char
+        %     Parent specification name, or 'none'.
+        % property_lines : cell array of char
+        %     Property declarations.
+        % rule_lines : cell array of char
+        %     Section-authored constraint lines. Empty means no section.
+            fid = fopen(file_path, 'w');
+            if fid < 0
+                error('Could not write test spec: %s', file_path);
+            end
+            cleanup = onCleanup(@() fclose(fid)); %#ok<NASGU>
+
+            fprintf(fid, '%s - v0.1.0\n', spec_name);
+            fprintf(fid, '----------------------\n');
+            fprintf(fid, 'extends: %s\n\n', parent_name);
+            fprintf(fid, 'properties\n----------\n');
+            for i = 1:numel(property_lines)
+                fprintf(fid, '%s\n', property_lines{i});
+            end
+
+            if ~isempty(rule_lines)
+                fprintf(fid, '\nconstraints\n-----------\n');
+                for i = 1:numel(rule_lines)
+                    fprintf(fid, '%s\n', rule_lines{i});
+                end
+            end
+        end
+
         function write_string_attribute(loc_id, attr_name, value)
             attr_space_id = H5S.create('H5S_SCALAR');
             str_type_id = H5T.copy('H5T_C_S1');
@@ -725,6 +763,161 @@ classdef validation_edge_cases_test < matlab.unittest.TestCase
 
                 testCase.verifyTrue(ds.validate(true));
             end
+        end
+
+        function test_rejects_malformed_group_constraint_lines(testCase)
+        % Reject unsupported kinds and malformed group-rule syntax.
+            bad_rules = { ...
+                'unknown_rule: a, b', ...
+                'paired: a, b', ...
+                'all_or_none a, b', ...
+                'all_or_none: a', ...
+                'all_or_none: a, a', ...
+                'all_or_none: a, , c'};
+
+            for i = 1:numel(bad_rules)
+                path = fullfile(testCase.temp_spec_folder, ...
+                    sprintf('malformed_rule_%d.txt', i));
+                validation_edge_cases_test.write_constraint_contract_spec( ...
+                    path, sprintf('malformed_rule_%d', i), 'none', ...
+                    {'a - f8 - scalar - optional', ...
+                     'b - f8 - scalar - optional'}, ...
+                    {bad_rules{i}});
+
+                did_error = false;
+                try
+                    SpecificationParser.parse_file(path);
+                catch
+                    did_error = true;
+                end
+                testCase.verifyTrue(did_error, bad_rules{i});
+
+                % Do not leave an invalid file in the shared temp folder:
+                % later tests may load the entire folder.
+                delete(path);
+            end
+        end
+
+        function test_paired_is_not_a_supported_constraint_kind(testCase)
+        % Reject a canonical kind that has no validator.
+            did_error = false;
+            try
+                ConstraintRule('paired', {'a', 'b'}, {});
+            catch
+                did_error = true;
+            end
+            testCase.verifyTrue(did_error);
+        end
+
+        function test_group_rule_can_reference_inherited_property(testCase)
+        % A rule can name a property defined by its parent specification.
+            parent_path = fullfile(testCase.temp_spec_folder, ...
+                'contract_parent.txt');
+            child_path = fullfile(testCase.temp_spec_folder, ...
+                'contract_child.txt');
+
+            validation_edge_cases_test.write_constraint_contract_spec( ...
+                parent_path, 'contract_parent', 'none', ...
+                {'a - f8 - scalar - optional'}, {});
+            validation_edge_cases_test.write_constraint_contract_spec( ...
+                child_path, 'contract_child', 'contract_parent', ...
+                {'b - f8 - scalar - optional'}, ...
+                {'all_or_none: a, b'});
+
+            registry = SpecificationRegistry();
+            registry.add_local_specification( ...
+                SpecificationParser.parse_file(parent_path));
+            registry.add_local_specification( ...
+                SpecificationParser.parse_file(child_path));
+
+            resolved = registry.resolve('contract_child');
+            testCase.verifyEqual(resolved.ancestry, ...
+                {'contract_parent', 'contract_child'});
+            testCase.verifyEqual( ...
+                resolved.constraints(1).subject_properties, {'a', 'b'});
+        end
+
+        function test_group_rule_rejects_unknown_property(testCase)
+        % Unknown property references fail after resolution.
+            path = fullfile(testCase.temp_spec_folder, ...
+                'unknown_constraint_name.txt');
+            validation_edge_cases_test.write_constraint_contract_spec( ...
+                path, 'unknown_constraint_name', 'none', ...
+                {'a - f8 - scalar - optional', ...
+                 'b - f8 - scalar - optional'}, ...
+                {'all_or_none: a, nonexistent'});
+
+            registry = SpecificationRegistry();
+            registry.add_local_specification( ...
+                SpecificationParser.parse_file(path));
+
+            did_error = false;
+            try
+                registry.resolve('unknown_constraint_name');
+            catch ME
+                did_error = contains(ME.message, 'nonexistent');
+            end
+            testCase.verifyTrue(did_error);
+        end
+
+        function test_choice_and_constraints_cannot_coexist(testCase)
+        % Reject interaction between choice branches and group rules,
+        % including when they originate in different ancestry levels.
+            parent_path = fullfile(testCase.temp_spec_folder, ...
+                'choice_parent.txt');
+            child_path = fullfile(testCase.temp_spec_folder, ...
+                'constraint_child.txt');
+
+            choice_lines = { ...
+                'a - f8 - scalar - or:mode:first', ...
+                'b - f8 - scalar - or:mode:second'};
+
+            validation_edge_cases_test.write_constraint_contract_spec( ...
+                parent_path, 'choice_parent', 'none', choice_lines, {});
+            validation_edge_cases_test.write_constraint_contract_spec( ...
+                child_path, 'constraint_child', 'choice_parent', ...
+                {'c - f8 - scalar - optional'}, ...
+                {'at_least_one_of: a, c'});
+
+            registry = SpecificationRegistry();
+            registry.add_local_specification( ...
+                SpecificationParser.parse_file(parent_path));
+            registry.add_local_specification( ...
+                SpecificationParser.parse_file(child_path));
+
+            did_error = false;
+            try
+                registry.resolve('constraint_child');
+            catch ME
+                did_error = contains(lower(ME.message), 'choice') && ...
+                    contains(lower(ME.message), 'constraint');
+            end
+            testCase.verifyTrue(did_error);
+        end
+
+        function test_inline_requires_and_choice_cannot_coexist(testCase)
+        % The prohibition also covers inline relational rules.
+            path = fullfile(testCase.temp_spec_folder, ...
+                'choice_and_requires.txt');
+
+            validation_edge_cases_test.write_constraint_contract_spec( ...
+                path, 'choice_and_requires', 'none', ...
+                {'a - f8 - scalar - or:mode:first,requires:c', ...
+                 'b - f8 - scalar - or:mode:second', ...
+                 'c - f8 - scalar - optional'}, {});
+
+            registry = SpecificationRegistry();
+            registry.add_local_specification( ...
+                SpecificationParser.parse_file(path));
+
+            did_error = false;
+            try
+                registry.resolve('choice_and_requires');
+            catch ME
+                did_error = contains(lower(ME.message), 'choice') && ...
+                    contains(lower(ME.message), 'constraint');
+            end
+            testCase.verifyTrue(did_error);
         end
 
     end
