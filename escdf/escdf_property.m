@@ -1073,10 +1073,16 @@ classdef escdf_property < handle
                 hdf5_path_or_id = char(hdf5_path_or_id);
             end
             if ischar(hdf5_path_or_id)
-                file_parts = strsplit(hdf5_path_or_id,':');
-                if length(file_parts) ~= 2
-                    error('If hdf5_path_or_id is a string, it should contain the file path and the internal dataset path separated by a colon.')
+                file_parts = strsplit(hdf5_path_or_id, '::');
+                if numel(file_parts) ~= 2 || ...
+                        isempty(file_parts{1}) || ...
+                        isempty(file_parts{2}) || ...
+                        ~startsWith(file_parts{2}, '/')
+                    error('escdf_property:InvalidHDF5Path', ...
+                        ['Specify an HDF5 property as ', ...
+                        '"file_path::/internal/dataset/path".']);
                 end
+
                 file_path = file_parts{1};
                 internal_path = file_parts{2};
                 if readonly
