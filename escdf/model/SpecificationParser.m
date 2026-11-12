@@ -711,29 +711,69 @@ classdef SpecificationParser
             end
         end
 
-        function constraints = parse_constraints_section(lines, constraints_section_start, source_specification)
-        % Parse an explicit constraints section.
+        function constraints = parse_constraints_section( ...
+                lines, constraints_section_start, source_specification)
+        % Parse group presence rules from a constraints section.
         %
         % Parameters
         % ----------
         % lines : cell array of char
-        %     Specification text lines.
+        %     Complete specification text split into lines.
         % constraints_section_start : numeric
-        %     Index of the constraints section header.
+        %     Index of the constraints section heading.
         % source_specification : char
-        %     Source specification name.
+        %     Name of the declaring specification.
         %
         % Returns
         % -------
         % constraints : ConstraintRule array
-        %     Parsed explicit constraint rules.
+        %     Parsed section-authored constraints.
         %
-        % Notes
-        % -----
-        % This is currently a placeholder until explicit constraints-section
-        % syntax is designed and implemented.
-            %#ok<INUSD>
+        % Raises
+        % ------
+        % error
+        %     Raised for an unsupported kind or malformed property list.
+            supported_kinds = { ...
+                'all_or_none', 'exactly_one_of', ...
+                'at_most_one_of', 'at_least_one_of'};
+
+            body = SpecificationParser.extract_section_body_lines( ...
+                lines, constraints_section_start);
             constraints = ConstraintRule.empty(1,0);
+
+            for i = 1:numel(body)
+                line = strtrim(body{i});
+                if isempty(line)
+                    continue
+                end
+
+                colon_index = strfind(line, ':');
+                if numel(colon_index) ~= 1
+                    error('Invalid constraint in "%s": %s', ...
+                        source_specification, line);
+                end
+
+                kind = strtrim(line(1:colon_index-1));
+                if ~ismember(kind, supported_kinds)
+                    error('Unsupported constraint kind "%s" in "%s".', ...
+                        kind, source_specification);
+                end
+
+                names = strtrim( ...
+                    strsplit(line(colon_index+1:end), ','));
+                if numel(names) < 2 || ...
+                        any(cellfun(@isempty, names)) || ...
+                        numel(unique(names)) ~= numel(names)
+                    error( ...
+                        ['Constraint "%s" in "%s" requires at least ', ...
+                         'two distinct, nonempty property names.'], ...
+                        kind, source_specification);
+                end
+
+                constraints(end+1) = ConstraintRule( ... %#ok<AGROW>
+                    kind, names, {}, ...
+                    'source_specification', source_specification);
+            end
         end
 
         function storage_hints = parse_chunking_section(lines, chunking_section_start, source_specification)

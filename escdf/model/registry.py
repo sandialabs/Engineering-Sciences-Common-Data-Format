@@ -163,7 +163,9 @@ class SpecificationRegistry:
         try:
             return self._resolved_specifications[name]
         except KeyError as exc:
-            raise KeyError(f'No resolved specification named "{name}" is loaded.') from exc
+            raise KeyError(
+                f'No resolved specification named "{name}" is loaded.'
+            ) from exc
 
     def list_local_names(self) -> list[str]:
         """
@@ -218,7 +220,9 @@ class SpecificationRegistry:
         if not isinstance(specification, Specification):
             raise ValueError("specification must be a Specification object.")
         if specification.name in self._local_specifications:
-            raise ValueError(f'A local specification named "{specification.name}" already exists.')
+            raise ValueError(
+                f'A local specification named "{specification.name}" already exists.'
+            )
         self._local_specifications[specification.name] = specification
 
     def add_resolved_specification(self, specification: ResolvedSpecification) -> None:
@@ -361,6 +365,23 @@ class SpecificationRegistry:
             constraints=constraints,
             storage_hints=storage_hints,
         )
+
+        known_names = set(resolved.property_names)
+        for rule in resolved.constraints:
+            if rule.kind not in {
+                "all_or_none",
+                "exactly_one_of",
+                "at_most_one_of",
+                "at_least_one_of",
+            }:
+                continue
+            unknown = set(rule.subject_properties) - known_names
+            if unknown:
+                raise ValueError(
+                    f'Specification "{specification_name}" has a '
+                    f"{rule.kind} constraint referencing unknown "
+                    f"properties: {sorted(unknown)}."
+                )
 
         self._resolved_specifications[specification_name] = resolved
         return resolved

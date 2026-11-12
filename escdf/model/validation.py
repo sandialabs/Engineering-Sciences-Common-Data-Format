@@ -145,7 +145,9 @@ class ValidationReport:
             )
 
         for item in self.inconsistent_dimensions:
-            lines.append(f"Dimension {item['dimension_name']} is inconsistent across properties.")
+            lines.append(
+                f"Dimension {item['dimension_name']} is inconsistent across properties."
+            )
             for binding in item["bindings"]:
                 lines.append(f"  {binding['property_name']}: {binding['size']}")
 
@@ -331,7 +333,9 @@ def validate_dataset_against_resolved_specification(
     # ------------------------------------------------------------------
     if getattr(dataset, "has_modified_properties", False):
         report.modified_property_failures.append(
-            {"message": "Dataset has modified properties and therefore cannot be valid."}
+            {
+                "message": "Dataset has modified properties and therefore cannot be valid."
+            }
         )
         report.is_valid = False
 
@@ -458,7 +462,9 @@ def _validate_present_property_against_definition(
 
     if property_definition.regex is not None:
         property_data = property_value[...]
-        invalid_values = _find_invalid_regex_values(property_data, property_definition.regex)
+        invalid_values = _find_invalid_regex_values(
+            property_data, property_definition.regex
+        )
         if invalid_values:
             report.invalid_regexes.append(
                 {
@@ -472,7 +478,9 @@ def _validate_present_property_against_definition(
     if property_definition.value_constraints:
         property_data = property_value[...]
         for constraint_name in property_definition.value_constraints:
-            message = _check_value_constraint(property_data, constraint_name, property_name)
+            message = _check_value_constraint(
+                property_data, constraint_name, property_name
+            )
             if message is not None:
                 report.invalid_value_constraints.append(
                     {
@@ -530,7 +538,9 @@ def _validate_choice_branch(
                 branch_ok = False
             continue
 
-        local_report = ValidationReport(checked_specification=report.checked_specification)
+        local_report = ValidationReport(
+            checked_specification=report.checked_specification
+        )
         property_ok = _validate_present_property_against_definition(
             property_value,
             property_definition,
@@ -756,7 +766,9 @@ def _check_value_constraint(
     if constraint_name == "strictly_increasing":
         values = _flatten_numeric_values(property_data)
         if len(values) > 1 and not np.all(values[1:] > values[:-1]):
-            return f"Property {property_name} violates the strictly_increasing constraint."
+            return (
+                f"Property {property_name} violates the strictly_increasing constraint."
+            )
         return None
 
     if constraint_name == "unique":
@@ -901,9 +913,17 @@ def _evaluate_constraint_rules(
             failure = _evaluate_requires_rule(rule, present_properties)
             if failure is not None:
                 failures.append(failure)
+        elif rule.kind in {
+            "all_or_none",
+            "exactly_one_of",
+            "at_most_one_of",
+            "at_least_one_of",
+        }:
+            failure = _evaluate_group_presence_rule(rule, present_properties)
+            if failure is not None:
+                failures.append(failure)
         else:
-            # Future constraint kinds will be implemented later.
-            continue
+            raise ValueError(f'Constraint kind "{rule.kind}" has no validator.')
 
     return failures
 
@@ -927,12 +947,16 @@ def _evaluate_requires_rule(
     dict or None
         Constraint-failure record if violated, otherwise ``None``.
     """
-    subjects_present = [name for name in rule.subject_properties if name in present_properties]
+    subjects_present = [
+        name for name in rule.subject_properties if name in present_properties
+    ]
 
     if not subjects_present:
         return None
 
-    missing_targets = [name for name in rule.target_properties if name not in present_properties]
+    missing_targets = [
+        name for name in rule.target_properties if name not in present_properties
+    ]
 
     if not missing_targets:
         return None
@@ -946,6 +970,53 @@ def _evaluate_requires_rule(
             f"Constraint requires failed: "
             f"present subject properties {subjects_present} require "
             f"target properties {missing_targets}."
+        ),
+    }
+
+
+def _evaluate_group_presence_rule(
+    rule,
+    present_properties: set[str],
+) -> dict[str, Any] | None:
+    """
+    Evaluate a group-wide property-presence constraint.
+
+    Parameters
+    ----------
+    rule : ConstraintRule
+        One group presence rule.
+    present_properties : set of str
+        Names of properties present on the dataset.
+
+    Returns
+    -------
+    dict or None
+        Failure record, or ``None`` if the rule is satisfied.
+    """
+    names = rule.subject_properties
+    present = [name for name in names if name in present_properties]
+    count = len(present)
+    total = len(names)
+
+    satisfied = {
+        "all_or_none": count in (0, total),
+        "exactly_one_of": count == 1,
+        "at_most_one_of": count <= 1,
+        "at_least_one_of": count >= 1,
+    }[rule.kind]
+
+    if satisfied:
+        return None
+
+    return {
+        "constraint_kind": rule.kind,
+        "subject_properties": list(names),
+        "target_properties": [],
+        "present_properties": present,
+        "message": (
+            f"Constraint {rule.kind} failed for "
+            f"{', '.join(names)}; present: "
+            f"{', '.join(present) if present else 'none'}."
         ),
     }
 

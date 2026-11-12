@@ -65,7 +65,9 @@ classdef ConstraintRule
         % error
         %     Raised if the rule kind or property-name collections are invalid.
 
-            valid_kinds = {'requires','paired','all_or_none','exactly_one_of'};
+            valid_kinds = { ...
+                'requires', 'paired', 'all_or_none', 'exactly_one_of', ...
+                'at_most_one_of', 'at_least_one_of'};
 
             if ~(ischar(kind) || isstring(kind))
                 error('ConstraintRule kind must be a string.');

@@ -720,9 +720,17 @@ classdef Validation
                     if ~isempty(failure)
                         failures{end+1} = failure; %#ok<AGROW>
                     end
+                elseif ismember(rule.kind, { ...
+                        'all_or_none', 'exactly_one_of', ...
+                        'at_most_one_of', 'at_least_one_of'})
+                    failure = Validation.evaluate_group_presence_rule( ...
+                        rule, present_properties);
+                    if ~isempty(failure)
+                        failures{end+1} = failure; %#ok<AGROW>
+                    end
                 else
-                    % Future constraint kinds will be implemented later.
-                    continue
+                    error('Constraint kind "%s" has no validator.', ...
+                        rule.kind);
                 end
             end
         end
@@ -766,6 +774,60 @@ classdef Validation
                     'Constraint requires failed: present subject properties %s require target properties %s.', ...
                     strjoin(subjects_present, ', '), ...
                     strjoin(missing_targets, ', ')));
+        end
+
+        function failure = evaluate_group_presence_rule( ...
+                rule, present_properties)
+        % Evaluate a group-wide property-presence constraint.
+        %
+        % Parameters
+        % ----------
+        % rule : ConstraintRule
+        %     Group presence rule.
+        % present_properties : cell array of char
+        %     Names of present properties.
+        %
+        % Returns
+        % -------
+        % failure : struct or []
+        %     Failure record, or empty if satisfied.
+            names = rule.subject_properties;
+            present = names(ismember(names, present_properties));
+            count = numel(present);
+            total = numel(names);
+
+            switch rule.kind
+                case 'all_or_none'
+                    satisfied = count == 0 || count == total;
+                case 'exactly_one_of'
+                    satisfied = count == 1;
+                case 'at_most_one_of'
+                    satisfied = count <= 1;
+                case 'at_least_one_of'
+                    satisfied = count >= 1;
+                otherwise
+                    error('Unsupported group rule "%s".', rule.kind);
+            end
+
+            if satisfied
+                failure = [];
+                return
+            end
+
+            if isempty(present)
+                present_text = 'none';
+            else
+                present_text = strjoin(present, ', ');
+            end
+
+            failure = struct( ...
+                'constraint_kind', rule.kind, ...
+                'subject_properties', {names}, ...
+                'target_properties', {{}}, ...
+                'present_properties', {present}, ...
+                'message', sprintf( ...
+                    'Constraint %s failed for %s; present: %s.', ...
+                    rule.kind, strjoin(names, ', '), present_text));
         end
 
     end

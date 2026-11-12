@@ -315,8 +315,13 @@ class PropertyDefinition:
         value_constraints = [v.strip() for v in value_constraints]
 
         if source_specification is not None:
-            if not isinstance(source_specification, str) or not source_specification.strip():
-                raise ValueError("source_specification must be a nonempty string or None.")
+            if (
+                not isinstance(source_specification, str)
+                or not source_specification.strip()
+            ):
+                raise ValueError(
+                    "source_specification must be a nonempty string or None."
+                )
             source_specification = source_specification.strip()
 
         self.name = name
@@ -387,7 +392,7 @@ class ConstraintRule:
 
     Parameters
     ----------
-    kind : {'requires', 'paired', 'all_or_none', 'exactly_one_of'}
+    kind : {'requires', 'paired', 'all_or_none', 'exactly_one_of', 'at_most_one_of', 'at_least_one_of'}
         Constraint kind.
     subject_properties : list of str
         Property names that define or trigger the rule.
@@ -428,9 +433,11 @@ class ConstraintRule:
 
     VALID_KINDS = {
         "requires",
-        "paired",
+        "paired",  # Existing model kind; not implemented by this change.
         "all_or_none",
         "exactly_one_of",
+        "at_most_one_of",
+        "at_least_one_of",
     }
 
     def __init__(
@@ -619,7 +626,9 @@ class Specification:
             raise ValueError("Specification name must be a nonempty string.")
         if not isinstance(version, Version):
             raise ValueError("version must be a Version object.")
-        if extends is not None and (not isinstance(extends, str) or not extends.strip()):
+        if extends is not None and (
+            not isinstance(extends, str) or not extends.strip()
+        ):
             raise ValueError("extends must be a nonempty string or None.")
         if not isinstance(documentation, str):
             raise ValueError("documentation must be a string.")
@@ -757,7 +766,9 @@ class ResolvedSpecification:
         if not isinstance(property_definitions, list) or not all(
             isinstance(p, PropertyDefinition) for p in property_definitions
         ):
-            raise ValueError("property_definitions must be a list of PropertyDefinition.")
+            raise ValueError(
+                "property_definitions must be a list of PropertyDefinition."
+            )
         if not isinstance(enumerations, dict):
             raise ValueError("enumerations must be a dict.")
         if not all(isinstance(c, ConstraintRule) for c in constraints):
@@ -779,7 +790,9 @@ class ResolvedSpecification:
         self.standalone_properties = [
             p for p in self.property_definitions if p.choice_group is None
         ]
-        self.required_properties = [p for p in self.standalone_properties if not p.optional]
+        self.required_properties = [
+            p for p in self.standalone_properties if not p.optional
+        ]
         self.optional_properties = [p for p in self.standalone_properties if p.optional]
         self.property_names = sorted(self.properties_by_name.keys())
         self.dimension_names = self._build_dimension_names()

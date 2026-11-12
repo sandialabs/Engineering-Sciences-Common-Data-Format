@@ -97,17 +97,27 @@ class SpecificationParser:
         extends_line_index = SpecificationParser._find_extends_line_index(lines)
         extends = SpecificationParser._parse_extends_line(lines)
 
-        properties_section_start = SpecificationParser._find_section_header(lines, "properties")
-        enumerations_section_start = SpecificationParser._find_section_header(lines, "enumerations")
-        constraints_section_start = SpecificationParser._find_section_header(lines, "constraints")
-        chunking_section_start = SpecificationParser._find_section_header(lines, "chunking")
+        properties_section_start = SpecificationParser._find_section_header(
+            lines, "properties"
+        )
+        enumerations_section_start = SpecificationParser._find_section_header(
+            lines, "enumerations"
+        )
+        constraints_section_start = SpecificationParser._find_section_header(
+            lines, "constraints"
+        )
+        chunking_section_start = SpecificationParser._find_section_header(
+            lines, "chunking"
+        )
         storage_hints_section_start = SpecificationParser._find_section_header(
             lines, "storage_hints"
         )
         notes_section_start = SpecificationParser._find_section_header(lines, "notes")
 
         if properties_section_start is None:
-            raise ValueError(f'Specification "{name}" is missing a required "properties" section.')
+            raise ValueError(
+                f'Specification "{name}" is missing a required "properties" section.'
+            )
 
         documentation = SpecificationParser._extract_documentation_block(
             lines,
@@ -216,11 +226,15 @@ class SpecificationParser:
             raise ValueError("Specification name in header cannot be empty.")
 
         if not version_part.startswith("v"):
-            raise ValueError(f'Invalid version string "{version_part}". Expected format "vX.Y.Z".')
+            raise ValueError(
+                f'Invalid version string "{version_part}". Expected format "vX.Y.Z".'
+            )
 
         version_numbers = version_part[1:].split(".")
         if len(version_numbers) != 3:
-            raise ValueError(f'Invalid version string "{version_part}". Expected format "vX.Y.Z".')
+            raise ValueError(
+                f'Invalid version string "{version_part}". Expected format "vX.Y.Z".'
+            )
 
         try:
             major, minor, patch = (int(v) for v in version_numbers)
@@ -351,11 +365,15 @@ class SpecificationParser:
         str
             Notes block text.
         """
-        body_lines = SpecificationParser._extract_section_body_lines(lines, notes_section_start)
+        body_lines = SpecificationParser._extract_section_body_lines(
+            lines, notes_section_start
+        )
         return "\n".join(body_lines).strip()
 
     @staticmethod
-    def _extract_section_body_lines(lines: list[str], section_start_index: int) -> list[str]:
+    def _extract_section_body_lines(
+        lines: list[str], section_start_index: int
+    ) -> list[str]:
         """
         Extract the body lines following a top-level section header.
 
@@ -520,7 +538,9 @@ class SpecificationParser:
             elif token.startswith("regex:"):
                 regex = token.split(":", 1)[1].strip()
             elif token.startswith("or:"):
-                choice_group, choice_branch = SpecificationParser._parse_choice_token(token)
+                choice_group, choice_branch = SpecificationParser._parse_choice_token(
+                    token
+                )
             elif token.startswith("requires:"):
                 target = token.split(":", 1)[1].strip()
                 constraints.append(
@@ -595,7 +615,9 @@ class SpecificationParser:
         for token in shape_field.split(","):
             token = token.strip()
             if not token:
-                raise ValueError(f'Invalid empty dimension token in shape "{shape_field}".')
+                raise ValueError(
+                    f'Invalid empty dimension token in shape "{shape_field}".'
+                )
             try:
                 value = int(token)
                 dims.append(Dimension.fixed(value))
@@ -661,12 +683,16 @@ class SpecificationParser:
         """
         parts = token.split(":")
         if len(parts) != 3:
-            raise ValueError(f'Invalid choice token "{token}". Expected format "or:group:branch".')
+            raise ValueError(
+                f'Invalid choice token "{token}". Expected format "or:group:branch".'
+            )
         _, group, branch = parts
         group = group.strip()
         branch = branch.strip()
         if not group or not branch:
-            raise ValueError(f'Invalid choice token "{token}". Group and branch must be nonempty.')
+            raise ValueError(
+                f'Invalid choice token "{token}". Group and branch must be nonempty.'
+            )
         return group, branch
 
     @staticmethod
@@ -727,31 +753,78 @@ class SpecificationParser:
         source_specification: str,
     ) -> list[ConstraintRule]:
         """
-        Parse an explicit constraints section.
+        Parse group presence rules from a constraints section.
 
         Parameters
         ----------
         lines : list of str
-            Specification text lines.
+            Complete specification text split into lines.
         constraints_section_start : int
-            Index of the ``constraints`` section header.
+            Index of the ``constraints`` section heading.
         source_specification : str
-            Source specification name.
+            Name of the declaring specification.
 
         Returns
         -------
         list of ConstraintRule
-            Parsed explicit constraint rules.
+            Parsed section-authored constraints.
+
+        Raises
+        ------
+        ValueError
+            If a rule kind or property-name list is malformed.
 
         Notes
         -----
-        This is currently a placeholder and returns an empty list until an
-        explicit constraints-section syntax is designed and implemented.
+        Referenced names are checked after inheritance resolution, not
+        here: a rule may refer to an inherited property.
         """
-        _ = lines
-        _ = constraints_section_start
-        _ = source_specification
-        return []
+        supported_kinds = {
+            "all_or_none",
+            "exactly_one_of",
+            "at_most_one_of",
+            "at_least_one_of",
+        }
+        rules = []
+
+        for raw_line in SpecificationParser._extract_section_body_lines(
+            lines, constraints_section_start
+        ):
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            kind, separator, names_text = line.partition(":")
+            kind = kind.strip()
+
+            if not separator or kind not in supported_kinds:
+                raise ValueError(
+                    f'Invalid constraint in "{source_specification}": '
+                    f'{raw_line!r}. Expected a supported "kind: a, b" rule.'
+                )
+
+            names = [name.strip() for name in names_text.split(",")]
+            if (
+                len(names) < 2
+                or any(not name for name in names)
+                or len(names) != len(set(names))
+            ):
+                raise ValueError(
+                    f'Invalid property list for "{kind}" in '
+                    f'"{source_specification}": {raw_line!r}. '
+                    "Specify at least two distinct, nonempty property names."
+                )
+
+            rules.append(
+                ConstraintRule(
+                    kind=kind,
+                    subject_properties=names,
+                    target_properties=[],
+                    source_specification=source_specification,
+                )
+            )
+
+        return rules
 
     @staticmethod
     def _parse_chunking_section(

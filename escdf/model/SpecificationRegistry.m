@@ -181,6 +181,28 @@ classdef SpecificationRegistry < handle
                 constraints, ...
                 storage_hints);
 
+            group_kinds = { ...
+                'all_or_none', 'exactly_one_of', ...
+                'at_most_one_of', 'at_least_one_of'};
+
+            for i = 1:numel(spec.constraints)
+                rule = spec.constraints(i);
+                if ~ismember(rule.kind, group_kinds)
+                    continue
+                end
+
+                unknown = rule.subject_properties( ...
+                    ~ismember(rule.subject_properties, spec.property_names));
+
+                if ~isempty(unknown)
+                    error( ...
+                        ['Specification "%s" has a %s constraint ', ...
+                         'referencing unknown properties: %s.'], ...
+                        specification_name, rule.kind, ...
+                        strjoin(unknown, ', '));
+                end
+            end
+
             obj.resolved_specifications(specification_name) = spec;
         end
 
