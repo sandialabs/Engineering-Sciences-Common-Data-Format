@@ -433,7 +433,6 @@ class ConstraintRule:
 
     VALID_KINDS = {
         "requires",
-        "paired",  # Existing model kind; not implemented by this change.
         "all_or_none",
         "exactly_one_of",
         "at_most_one_of",

@@ -181,6 +181,36 @@ classdef SpecificationRegistry < handle
                 constraints, ...
                 storage_hints);
 
+            choice_property_names = {};
+
+            for i = 1:numel(spec.property_definitions)
+                property_definition = spec.property_definitions(i);
+
+                if property_definition.is_choice_member()
+                    choice_property_names{end+1} = ... %#ok<AGROW>
+                        property_definition.name;
+                end
+            end
+
+            choice_property_names = unique(choice_property_names);
+
+            for i = 1:numel(spec.constraints)
+                rule = spec.constraints(i);
+                referenced_names = [ ...
+                    rule.subject_properties, rule.target_properties];
+
+                overlap = intersect( ...
+                    choice_property_names, referenced_names);
+
+                if ~isempty(overlap)
+                    error( ...
+                        ['Specification "%s" has a %s constraint ', ...
+                         'referencing choice-group properties: %s.'], ...
+                        specification_name, rule.kind, ...
+                        strjoin(overlap, ', '));
+                end
+            end
+
             group_kinds = { ...
                 'all_or_none', 'exactly_one_of', ...
                 'at_most_one_of', 'at_least_one_of'};

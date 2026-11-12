@@ -34,6 +34,7 @@ MALFORMED_GROUP_RULES = (
     "all_or_none: a, b,",
 )
 
+
 @pytest.fixture
 def validation_specs(tmp_path):
     temp_spec_dir = tmp_path / "validation_specs"
@@ -609,10 +610,10 @@ def test_exactly_one_accepts_each_individual_property(validation_specs, single_n
 
 
 def _constraint_spec_text(
-    name, *,
+    name,
+    *,
     extends="none",
-    properties=("a - f8 - scalar - optional",
-                "b - f8 - scalar - optional"),
+    properties=("a - f8 - scalar - optional", "b - f8 - scalar - optional"),
     constraints=("all_or_none: a, b",),
 ):
     """Build a small test-only specification."""
@@ -636,9 +637,7 @@ def test_rejects_malformed_group_constraint_lines(tmp_path, rule_line):
 
     path = tmp_path / "malformed_constraint.txt"
     path.write_text(
-        _constraint_spec_text(
-            "malformed_constraint", constraints=(rule_line,)
-        ),
+        _constraint_spec_text("malformed_constraint", constraints=(rule_line,)),
         encoding="utf-8",
     )
 
@@ -712,9 +711,7 @@ def test_group_rule_rejects_unknown_property_after_resolution(tmp_path):
     (False, True),
     ids=("local-choice", "inherited-choice"),
 )
-def test_choice_and_constraints_cannot_coexist(
-    tmp_path, choice_in_parent
-):
+def test_choice_and_constraints_cannot_coexist(tmp_path, choice_in_parent):
     """Reject choices and relational rules together in the resolved spec."""
     from escdf.model import SpecificationRegistry
 
@@ -728,9 +725,7 @@ def test_choice_and_constraints_cannot_coexist(
             "choice_parent - v0.1.0\n"
             "----------------------\n"
             "extends: none\n\n"
-            "properties\n----------\n"
-            + "\n".join(choice_properties)
-            + "\n",
+            "properties\n----------\n" + "\n".join(choice_properties) + "\n",
             encoding="utf-8",
         )
         name = "constraint_child"
@@ -778,3 +773,78 @@ def test_inline_requires_and_choice_cannot_coexist(tmp_path):
 
     with pytest.raises(ValueError, match=r"(?i)choice.*constraint|constraint.*choice"):
         registry.resolve("choice_and_requires")
+
+
+@pytest.mark.parametrize(
+    "choice_in_parent",
+    (False, True),
+    ids=("local-choice", "inherited-choice"),
+)
+def test_choice_and_unrelated_constraint_can_coexist(tmp_path, choice_in_parent):
+    """A constraint may use standalone properties alongside choices."""
+    from escdf.model import SpecificationRegistry
+
+    choice_properties = (
+        "a - f8 - scalar - or:mode:first",
+        "b - f8 - scalar - or:mode:second",
+    )
+    standalone_properties = (
+        "c - f8 - scalar - optional",
+        "d - f8 - scalar - optional",
+    )
+
+    if choice_in_parent:
+        (tmp_path / "choice_parent.txt").write_text(
+            "choice_parent - v0.1.0\n"
+            "----------------------\n"
+            "extends: none\n\n"
+            "properties\n----------\n" + "\n".join(choice_properties) + "\n",
+            encoding="utf-8",
+        )
+        spec_name = "independent_constraint_child"
+        text = _constraint_spec_text(
+            spec_name,
+            extends="choice_parent",
+            properties=standalone_properties,
+            constraints=("all_or_none: c, d",),
+        )
+    else:
+        spec_name = "independent_choice_and_constraint"
+        text = _constraint_spec_text(
+            spec_name,
+            properties=choice_properties + standalone_properties,
+            constraints=("all_or_none: c, d",),
+        )
+
+    (tmp_path / f"{spec_name}.txt").write_text(text, encoding="utf-8")
+
+    registry = SpecificationRegistry()
+    registry.load_from_directory(str(tmp_path))
+    resolved = registry.resolve(spec_name)
+
+    assert "mode" in resolved.choice_groups
+    assert len(resolved.constraints) == 1
+    assert resolved.constraints[0].subject_properties == ["c", "d"]
+
+
+def test_requires_cannot_target_choice_property(tmp_path):
+    """The target, not just the subject, must be checked for overlap."""
+    from escdf.model import SpecificationRegistry
+
+    path = tmp_path / "requires_choice_target.txt"
+    path.write_text(
+        "requires_choice_target - v0.1.0\n"
+        "--------------------------------\n"
+        "extends: none\n\n"
+        "properties\n----------\n"
+        "a - f8 - scalar - or:mode:first\n"
+        "b - f8 - scalar - or:mode:second\n"
+        "c - f8 - scalar - optional,requires:a\n",
+        encoding="utf-8",
+    )
+
+    registry = SpecificationRegistry()
+    registry.load_from_directory(str(tmp_path))
+
+    with pytest.raises(ValueError, match="choice-group properties.*a"):
+        registry.resolve("requires_choice_target")

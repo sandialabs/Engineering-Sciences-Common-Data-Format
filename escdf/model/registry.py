@@ -366,6 +366,25 @@ class SpecificationRegistry:
             storage_hints=storage_hints,
         )
 
+        choice_property_names = {
+            prop.name
+            for prop in resolved.property_definitions
+            if prop.choice_group is not None
+        }
+
+        for rule in resolved.constraints:
+            referenced_names = set(rule.subject_properties) | set(
+                rule.target_properties
+            )
+            overlap = choice_property_names & referenced_names
+
+            if overlap:
+                raise ValueError(
+                    f'Specification "{specification_name}" has a '
+                    f"{rule.kind} constraint referencing choice-group "
+                    f"properties: {sorted(overlap)}."
+                )
+
         known_names = set(resolved.property_names)
         for rule in resolved.constraints:
             if rule.kind not in {
