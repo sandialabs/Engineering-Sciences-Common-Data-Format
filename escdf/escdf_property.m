@@ -648,6 +648,13 @@ classdef escdf_property < handle
         %     First-pass implementation supports only 'memory'.
         % overwrite : logical, optional
         %     If true, allow replacing an existing target dataset.
+        %
+        % Notes
+        % -----
+        % The property changes to HDF5-backed storage only after the
+        % payload and data_type attribute have both been written
+        % successfully. Temporary HDF5 identifiers are closed on normal
+        % completion and on errors.
             if nargin < 3
                 strategy = 'memory';
             end
@@ -663,59 +670,126 @@ classdef escdf_property < handle
                 return
             end
 
-            if H5L.exists(h5g_id, obj.name, 'H5P_DEFAULT')
+            if H5L.exists(h5g_id, obj.name, 'H5P_DEFAULT') ~= 0
                 if ~overwrite
-                    error('Target HDF5 group already contains dataset "%s". Use overwrite=true to replace it explicitly.', obj.name)
+                    error( ...
+                        ['Target HDF5 group already contains dataset "%s". ' ...
+                         'Use overwrite=true to replace it explicitly.'], ...
+                        obj.name)
                 end
+
+                % Existing behavior. This is NOT transactional: failure
+                % after this deletion will not restore the old target.
                 H5L.delete(h5g_id, obj.name, 'H5P_DEFAULT');
             end
 
             if ~obj.inmemory
-                % TODO: Replace this eager materialization with direct HDF5
+                % TODO: Replace eager materialization with direct HDF5
                 % copy or streamed copy for large datasets.
+                %
+                % This currently changes the property's source
+                % representation before the target write begins.
                 obj.read_into_memory();
             end
 
-            if obj.inmemory
+            new_dataset_id = [];
+            created_target_link = false;
+
+            try
                 if isempty(obj.size)
                     space_id = H5S.create('H5S_SCALAR');
                 else
-                    space_id = H5S.create_simple(length(obj.size), obj.size, obj.size);
+                    space_id = H5S.create_simple( ...
+                        length(obj.size), obj.size, obj.size);
                 end
+                space_cleanup = onCleanup(@() H5S.close(space_id));
 
-                obj.h5d_id = H5D.create(h5g_id, obj.name, obj.h5type_id, space_id, 'H5P_DEFAULT');
-                H5S.close(space_id);
+                % Do not assign this ID to obj.h5d_id yet.
+                new_dataset_id = H5D.create( ...
+                    h5g_id, obj.name, obj.h5type_id, ...
+                    space_id, 'H5P_DEFAULT');
+                created_target_link = true;
+
+                clear space_cleanup
 
                 data = obj.data;
 
-                % MATLAB and HDF5 dimension orders differ.
+                % Preserve the existing MATLAB/HDF5 dimension handling.
                 if ~isempty(obj.size)
                     data = permute(data, ndims(data):-1:1);
                 end
 
+                % Preserve the existing complex-data handling.
                 if strcmpi(obj.format, 'c8')
-                    data = struct('r', single(real(data)), 'i', single(imag(data)));
+                    data = struct( ...
+                        'r', single(real(data)), ...
+                        'i', single(imag(data)));
                 elseif strcmpi(obj.format, 'c16')
-                    data = struct('r', double(real(data)), 'i', double(imag(data)));
+                    data = struct( ...
+                        'r', double(real(data)), ...
+                        'i', double(imag(data)));
                 end
 
-                H5D.write(obj.h5d_id, obj.h5type_id, 'H5S_ALL', 'H5S_ALL', 'H5P_DEFAULT', data);
+                H5D.write( ...
+                    new_dataset_id, obj.h5type_id, ...
+                    'H5S_ALL', 'H5S_ALL', 'H5P_DEFAULT', data);
 
+                attr_space_id = H5S.create('H5S_SCALAR');
+                attr_space_cleanup = onCleanup( ...
+                    @() H5S.close(attr_space_id));
+
+                str_type_id = H5T.copy('H5T_C_S1');
+                str_type_cleanup = onCleanup( ...
+                    @() H5T.close(str_type_id));
+                H5T.set_size(str_type_id, 'H5T_VARIABLE');
+
+                attr_id = H5A.create( ...
+                    new_dataset_id, 'data_type', ...
+                    str_type_id, attr_space_id, 'H5P_DEFAULT');
+                attr_cleanup = onCleanup(@() H5A.close(attr_id));
+
+                H5A.write(attr_id, str_type_id, obj.format);
+
+                % Finish all temporary-resource cleanup before committing
+                % the new dataset ID to the property.
+                clear attr_cleanup
+                clear str_type_cleanup
+                clear attr_space_cleanup
+
+                % Commit only after the payload and attribute succeeded.
+                obj.h5d_id = new_dataset_id;
                 obj.data = missing;
                 obj.inmemory = false;
 
-                attr_space_id = H5S.create('H5S_SCALAR');
-                str_type_id = H5T.copy('H5T_C_S1');
-                H5T.set_size(str_type_id, 'H5T_VARIABLE');
-                attr_id = H5A.create(obj.h5d_id, 'data_type', str_type_id, attr_space_id, 'H5P_DEFAULT');
-                H5A.write(attr_id, str_type_id, obj.format);
-                H5A.close(attr_id);
-                H5T.close(str_type_id);
-                H5S.close(attr_space_id);
-                return
-            end
+            catch ME
+                % Release any temporary IDs that were successfully opened.
+                % `clear` invokes their onCleanup callbacks.
+                clear attr_cleanup
+                clear str_type_cleanup
+                clear attr_space_cleanup
+                clear space_cleanup
 
-            error('Property %s could not be realized to disk.', obj.name);
+                if ~isempty(new_dataset_id)
+                    try
+                        H5D.close(new_dataset_id);
+                    catch
+                        % Preserve the original realization failure.
+                    end
+                end
+
+                if created_target_link
+                    try
+                        H5L.delete( ...
+                            h5g_id, obj.name, 'H5P_DEFAULT');
+                    catch
+                        % Preserve the original realization failure.
+                    end
+                end
+
+                sprintf('Property %s could not be realized to disk.\n', obj.name);
+
+                rethrow(ME)
+            end
         end
 
         function read_into_memory(obj)
