@@ -18,6 +18,7 @@ classdef validation_edge_cases_test < matlab.unittest.TestCase
         ambiguous_choice_specification_file
         value_constraints_specification_file
         requires_specification_file
+        group_constraint_specification_files
     end
 
     methods (TestMethodSetup)
@@ -59,6 +60,27 @@ classdef validation_edge_cases_test < matlab.unittest.TestCase
                 testCase.value_constraints_specification_file);
             validation_edge_cases_test.write_requires_specification( ...
                 testCase.requires_specification_file);
+
+            kinds = { ...
+                'all_or_none', ...
+                'exactly_one_of', ...
+                'at_most_one_of', ...
+                'at_least_one_of'};
+
+            testCase.group_constraint_specification_files = ...
+                cell(1, numel(kinds));
+
+            for i = 1:numel(kinds)
+                spec_name = ['validation_', kinds{i}, '_spec'];
+                file_path = fullfile( ...
+                    testCase.temp_spec_folder, ...
+                    [spec_name, '.txt']);
+
+                validation_edge_cases_test.write_group_constraint_specification( ...
+                    file_path, spec_name, kinds{i});
+
+                testCase.group_constraint_specification_files{i} = file_path;
+            end
 
             escdf_dataset.reload_specification_cache();
             escdf_dataset.load_specification_directory(testCase.temp_spec_folder);
@@ -183,6 +205,36 @@ classdef validation_edge_cases_test < matlab.unittest.TestCase
             fprintf(fid, 'attachments - bytes - num_attachments - optional,requires:attachment_names\n');
             fprintf(fid, 'attachment_names - str - num_attachments - optional,requires:attachments\n');
             fclose(fid);
+        end
+
+        function write_group_constraint_specification(file_path, spec_name, kind)
+        % Write one test-owned specification with a group presence rule.
+        %
+        % Parameters
+        % ----------
+        % file_path : char
+        %     Temporary specification file path.
+        % spec_name : char
+        %     Specification name.
+        % kind : char
+        %     Group constraint kind.
+            fid = fopen(file_path, 'w');
+            if fid < 0
+                error('Unable to create test specification: %s', file_path);
+            end
+            file_cleanup = onCleanup(@() fclose(fid)); %#ok<NASGU>
+
+            fprintf(fid, '%s - v0.1.0\n', spec_name);
+            fprintf(fid, '----------------------\n');
+            fprintf(fid, 'extends: none\n\n');
+            fprintf(fid, 'properties\n');
+            fprintf(fid, '----------\n');
+            fprintf(fid, 'a - f8 - scalar - optional\n');
+            fprintf(fid, 'b - f8 - scalar - optional\n');
+            fprintf(fid, 'c - f8 - scalar - optional\n\n');
+            fprintf(fid, 'constraints\n');
+            fprintf(fid, '-----------\n');
+            fprintf(fid, '%s: a, b, c\n', kind);
         end
 
         function write_string_attribute(loc_id, attr_name, value)
@@ -578,5 +630,102 @@ classdef validation_edge_cases_test < matlab.unittest.TestCase
             testCase.verifyFalse(report.is_valid);
             testCase.verifyGreaterThan(numel(report.constraint_failures), 0);
         end
+
+        function test_group_constraint_presence_semantics(testCase)
+        % Verify the four group rules over zero through three properties.
+            kinds = { ...
+                'all_or_none', ...
+                'exactly_one_of', ...
+                'at_most_one_of', ...
+                'at_least_one_of'};
+
+            expected = logical([ ...
+                1 0 0 1;  % all_or_none
+                0 1 0 0;  % exactly_one_of
+                1 1 0 0;  % at_most_one_of
+                0 1 1 1]); % at_least_one_of
+
+            names = {'a', 'b', 'c'};
+
+            for i = 1:numel(kinds)
+                spec_name = ['validation_', kinds{i}, '_spec'];
+
+                for count = 0:3
+                    ds = escdf_dataset( ...
+                        sprintf('dataset_%d_%d', i, count), ...
+                        spec_name);
+
+                    for j = 1:count
+                        ds.(names{j}) = double(j);
+                    end
+
+                    report = ds.validate(true, true);
+                    expected_valid = expected(i, count + 1);
+
+                    testCase.verifyEqual( ...
+                        report.is_valid, expected_valid, ...
+                        sprintf('%s with %d properties', ...
+                            kinds{i}, count));
+
+                    if ~expected_valid
+                        testCase.verifyNotEmpty( ...
+                            report.constraint_failures);
+                        failure_kinds = cellfun( ...
+                            @(item) item.constraint_kind, ...
+                            report.constraint_failures, ...
+                            'UniformOutput', false);
+                        testCase.verifyTrue( ...
+                            any(strcmp(failure_kinds, kinds{i})));
+                    else
+                        testCase.verifyEmpty( ...
+                            report.constraint_failures);
+                    end
+                end
+            end
+        end
+
+        function test_group_constraints_are_parsed_and_resolved(testCase)
+        % Verify each temporary section produces one canonical rule.
+            kinds = { ...
+                'all_or_none', ...
+                'exactly_one_of', ...
+                'at_most_one_of', ...
+                'at_least_one_of'};
+
+            registry = SpecificationRegistry.build_default_registry();
+            registry.load_from_directory(testCase.temp_spec_folder);
+
+            for i = 1:numel(kinds)
+                spec_name = ['validation_', kinds{i}, '_spec'];
+                local_spec = registry.get_local(spec_name);
+                resolved_spec = registry.resolve(spec_name);
+
+                testCase.verifyEqual(numel(local_spec.constraints), 1);
+                testCase.verifyEqual(numel(resolved_spec.constraints), 1);
+
+                rule = resolved_spec.constraints(1);
+                testCase.verifyEqual(rule.kind, kinds{i});
+                testCase.verifyEqual( ...
+                    rule.subject_properties, {'a', 'b', 'c'});
+                testCase.verifyEmpty(rule.target_properties);
+                testCase.verifyEqual( ...
+                    rule.source_specification, spec_name);
+            end
+        end
+
+        function test_exactly_one_accepts_each_individual_property(testCase)
+        % Verify rule behavior is independent of property-list order.
+            names = {'a', 'b', 'c'};
+
+            for i = 1:numel(names)
+                ds = escdf_dataset( ...
+                    sprintf('one_source_%d', i), ...
+                    'validation_exactly_one_of_spec');
+                ds.(names{i}) = 1.0;
+
+                testCase.verifyTrue(ds.validate(true));
+            end
+        end
+
     end
 end

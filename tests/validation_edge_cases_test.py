@@ -6,6 +6,24 @@ import pytest
 import gc
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+GROUP_CONSTRAINT_CASES = (
+    ("all_or_none", (), True),
+    ("all_or_none", ("a",), False),
+    ("all_or_none", ("a", "b"), False),
+    ("all_or_none", ("a", "b", "c"), True),
+    ("exactly_one_of", (), False),
+    ("exactly_one_of", ("a",), True),
+    ("exactly_one_of", ("a", "b"), False),
+    ("exactly_one_of", ("a", "b", "c"), False),
+    ("at_most_one_of", (), True),
+    ("at_most_one_of", ("a",), True),
+    ("at_most_one_of", ("a", "b"), False),
+    ("at_most_one_of", ("a", "b", "c"), False),
+    ("at_least_one_of", (), False),
+    ("at_least_one_of", ("a",), True),
+    ("at_least_one_of", ("a", "b"), True),
+    ("at_least_one_of", ("a", "b", "c"), True),
+)
 
 
 @pytest.fixture
@@ -123,6 +141,32 @@ def validation_specs(tmp_path):
         encoding="utf-8",
     )
 
+    group_constraint_kinds = (
+        "all_or_none",
+        "exactly_one_of",
+        "at_most_one_of",
+        "at_least_one_of",
+    )
+
+    for kind in group_constraint_kinds:
+        spec_name = f"validation_{kind}_spec"
+        spec_text = (
+            f"{spec_name} - v0.1.0\n"
+            "----------------------\n"
+            "extends: none\n"
+            "\n"
+            "properties\n"
+            "----------\n"
+            "a - f8 - scalar - optional\n"
+            "b - f8 - scalar - optional\n"
+            "c - f8 - scalar - optional\n"
+            "\n"
+            "constraints\n"
+            "-----------\n"
+            f"{kind}: a, b, c\n"
+        )
+        (temp_spec_dir / f"{spec_name}.txt").write_text(spec_text, encoding="utf-8")
+
     for key in list(sys.modules.keys()):
         if key.startswith("escdf"):
             del sys.modules[key]
@@ -142,6 +186,7 @@ def validation_specs(tmp_path):
 
     gc.collect()
 
+
 def test_missing_required_property_fails(validation_specs):
     escdf = validation_specs
     ds = escdf.Dataset("d1", "validation_enum_spec")
@@ -158,6 +203,7 @@ def test_optional_property_can_be_omitted(validation_specs):
     ds.color_array = ["red", "green"]
     assert ds.optional_name is None
     assert ds.validate() is True
+
 
 def test_enum_scalar_invalid_fails(validation_specs):
     escdf = validation_specs
@@ -185,6 +231,7 @@ def test_enum_values_valid_pass(validation_specs):
     ds.color_array = ["red", "green", "blue"]
     assert ds.validate() is True
 
+
 def test_regex_valid_passes(validation_specs):
     escdf = validation_specs
     ds = escdf.Dataset("d1", "validation_regex_spec")
@@ -197,6 +244,7 @@ def test_regex_invalid_fails(validation_specs):
     ds = escdf.Dataset("d1", "validation_regex_spec")
     ds.channel = ["1X+", "BAD_CHANNEL"]
     assert ds.validate() is False
+
 
 def test_variable_dimension_consistency_passes(validation_specs):
     escdf = validation_specs
@@ -226,6 +274,7 @@ def test_matrix_dimension_mismatch_fails(validation_specs):
     ds.m = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
     ds.n = np.array([[5.0, 6.0, 7.0], [8.0, 9.0, 10.0]], dtype=np.float64)
     assert ds.validate() is False
+
 
 def test_choice_ab_valid(validation_specs):
     escdf = validation_specs
@@ -263,6 +312,7 @@ def test_choice_d_array_valid(validation_specs):
     ds.d = [1, 2, 3]
     assert ds.validate() is True
 
+
 def test_explicit_ambiguous_choice_reports_invalid(validation_specs):
     """
     Verify that a specification with multiple simultaneously valid choice
@@ -277,6 +327,7 @@ def test_explicit_ambiguous_choice_reports_invalid(validation_specs):
     report = ds.validate(report=True)
     assert report.is_valid is False
     assert len(report.ambiguous_choices) > 0
+
 
 def test_modified_property_invalidates_dataset(validation_specs):
     escdf = validation_specs
@@ -491,3 +542,59 @@ def test_requires_constraint_failure_appears_in_report(validation_specs):
     report = ds.validate(report=True)
     assert report.is_valid is False
     assert len(report.constraint_failures) > 0
+
+
+@pytest.mark.parametrize("kind,present_names,expected_valid", GROUP_CONSTRAINT_CASES)
+def test_group_constraint_presence_semantics(
+    validation_specs, kind, present_names, expected_valid
+):
+    """Validate the presence truth table for a section-authored rule."""
+    ds = validation_specs.Dataset(f"dataset_{kind}", f"validation_{kind}_spec")
+
+    for index, name in enumerate(present_names, start=1):
+        setattr(ds, name, float(index))
+
+    report = ds.validate(hide_issues=True, report=True)
+
+    assert report.is_valid is expected_valid
+    if not expected_valid:
+        assert report.constraint_failures
+        assert any(
+            failure["constraint_kind"] == kind for failure in report.constraint_failures
+        )
+    else:
+        assert report.constraint_failures == []
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ("all_or_none", "exactly_one_of", "at_most_one_of", "at_least_one_of"),
+)
+def test_group_constraint_is_parsed_and_resolved(validation_specs, tmp_path, kind):
+    """Retain a section-authored constraint through registry resolution."""
+    from escdf.model import SpecificationRegistry
+
+    spec_name = f"validation_{kind}_spec"
+    registry = SpecificationRegistry.build_default_registry()
+    registry.load_from_directory(str(tmp_path / "validation_specs"))
+
+    local = registry.get_local(spec_name)
+    resolved = registry.resolve(spec_name)
+
+    assert len(local.constraints) == 1
+    assert len(resolved.constraints) == 1
+
+    rule = resolved.constraints[0]
+    assert rule.kind == kind
+    assert rule.subject_properties == ["a", "b", "c"]
+    assert rule.target_properties == []
+    assert rule.source_specification == spec_name
+
+
+@pytest.mark.parametrize("single_name", ("a", "b", "c"))
+def test_exactly_one_accepts_each_individual_property(validation_specs, single_name):
+    """No listed property receives special treatment based on its order."""
+    ds = validation_specs.Dataset("one_source", "validation_exactly_one_of_spec")
+    setattr(ds, single_name, 1.0)
+
+    assert ds.validate(hide_issues=True) is True
