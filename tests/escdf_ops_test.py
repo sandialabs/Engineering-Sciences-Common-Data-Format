@@ -1824,13 +1824,13 @@ def test_renames_are_realized_in_new_file_without_changing_source(
     original.add_data_to_activity("act1", make_minimal_data("data1"))
 
     # Current write_to_disk returns an open handle: close it explicitly.
-    original.write_to_disk(str(source_path)).close()
+    original.write_to_disk(str(source_path))
 
     edited = escdf.ESCDF.load(str(source_path), readonly=True)
     edited.rename_metadata("meta1", "meta2")
     edited.rename_activity_data("act1", "data1", "data2")
 
-    edited.write_to_disk(str(target_path)).close()
+    edited.write_to_disk(str(target_path))
 
     # Check the physical HDF5 structure, not just the edited object graph.
     with h5py.File(target_path, "r") as target:
@@ -1851,3 +1851,62 @@ def test_renames_are_realized_in_new_file_without_changing_source(
         assert "meta2" not in source
         assert "data1" in source["activities"]["act1"]
         assert "data2" not in source["activities"]["act1"]
+
+
+def test_write_to_disk_closes_writer_and_preserves_wrapper_identity(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    path = tmp_path / "complete.h5"
+    f = escdf.ESCDF()
+    f.add_metadata(make_minimal_metadata("meta1"))
+
+    metadata = f.metadata["meta1"]
+    prop = metadata.test_name
+    expected = prop[...]
+
+    result = f.write_to_disk(path)
+
+    assert result is None
+    assert f.metadata["meta1"] is metadata
+    assert metadata.test_name is prop
+    assert prop.is_closed
+
+    with pytest.raises(RuntimeError, match="closed HDF5 handle"):
+        _ = prop[...]
+
+    with h5py.File(path, "r") as written:
+        stored = written["meta1"]["test_name"][()]
+        if isinstance(stored, bytes):
+            stored = stored.decode("utf-8")
+        assert stored == expected
+
+
+def test_write_to_disk_rejects_clobbering_its_backing_source(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        escdf.ESCDF,
+        "get_or_prompt_attribution_name",
+        staticmethod(lambda **kwargs: "unit_test_user"),
+    )
+
+    source_path = tmp_path / "source.h5"
+
+    original = escdf.ESCDF()
+    original.add_metadata(make_minimal_metadata("meta1"))
+    original.write_to_disk(source_path)
+
+    loaded = escdf.ESCDF.load(str(source_path), readonly=True)
+    source_prop = loaded.metadata["meta1"].test_name
+    expected = source_prop[...]
+
+    with pytest.raises(ValueError, match="Cannot clobber"):
+        loaded.write_to_disk(source_path, clobber=True)
+
+    # Preflight failure must leave the source usable and unchanged.
+    assert not source_prop.is_closed
+    assert source_prop[...] == expected

@@ -1115,63 +1115,124 @@ class ESCDF:
         h5_file.flush()
         return h5_file
 
-    def write_to_disk(self, h5_file, clobber=False):
+    def _assert_safe_write_target(self, file_path, clobber):
         """
-        Write the container to an HDF5 file.
+        Reject a destructive write over an existing backing source.
 
         Parameters
         ----------
-        h5_file : str or h5py.File
-            Output file path or an open HDF5 file handle.
-        clobber : bool, optional
-            If ``True`` and ``h5_file`` is a path, overwrite an existing
-            file. If ``False``, require that the target file not already
-            exist.
-
-        Returns
-        -------
-        h5py.File
-            Open HDF5 file handle containing the written ESCDF data.
+        file_path : str or os.PathLike
+            Proposed output path.
+        clobber : bool
+            Whether the output would replace an existing file.
 
         Raises
         ------
         ValueError
-            If any metadata or activity dataset fails validation before
-            writing.
+            If clobbering would truncate a file currently used as backing
+            by this container or one of its descendants.
 
         Notes
         -----
-        All contained datasets are validated before any HDF5 content is
-        written.
+        This first-pass check protects the current logical graph. It does
+        not attempt to discover arbitrary aliases held outside that graph.
         """
-        # First go through and validate the metadata
+        if not clobber:
+            return
+
+        target = HDF5Location(file_path, "/")
+
+        locations = [self.hdf5_location]
+
+        for metadata in self.metadata:
+            locations.append(metadata.hdf5_location)
+            for name in metadata.property_names:
+                prop = getattr(metadata, name, None)
+                if prop is not None:
+                    locations.append(prop.hdf5_location)
+
+        for activity in self.activities:
+            locations.append(activity.hdf5_location)
+            for dataset in activity.data:
+                locations.append(dataset.hdf5_location)
+                for name in dataset.property_names:
+                    prop = getattr(dataset, name, None)
+                    if prop is not None:
+                        locations.append(prop.hdf5_location)
+
+        if any(
+            location is not None and location.same_file_as(target)
+            for location in locations
+        ):
+            raise ValueError(
+                "Cannot clobber the output file because it currently backs "
+                "this ESCDF object graph. Write to a different path."
+            )
+
+    def write_to_disk(self, file_path, clobber=False):
+        """
+        Write a complete ESCDF file and close its writer before returning.
+
+        Parameters
+        ----------
+        file_path : str or os.PathLike
+            Output HDF5 file path.
+        clobber : bool, optional
+            If ``True``, replace an existing output file unless that file
+            currently backs this object graph. If ``False``, require that
+            the output file not already exist.
+
+        Returns
+        -------
+        None
+            The output file opened by this method is closed before return.
+
+        Raises
+        ------
+        ValueError
+            If contained data is invalid or clobbering would truncate a
+            file used as backing by this graph.
+        FileExistsError
+            If the target exists and ``clobber`` is ``False``.
+
+        Notes
+        -----
+        This is a terminal write for the current HDF5-backed object graph.
+        ESCDF wrapper identities are preserved, but properties realized
+        into the output hold closed access handles after the writer closes.
+        Reload the output to continue accessing those properties.
+
+        Use ``realize_to_hdf5(open_file)`` when the caller deliberately
+        manages an open HDF5 file handle.
+        """
+        # Validate before creating/truncating the output file.
         for metadata in self.metadata:
             if not metadata.validate():
                 raise ValueError(
-                    "Cannot write to disk, metadata {:} is invalid.".format(
-                        metadata.name
-                    )
+                    f"Cannot write to disk, metadata {metadata.name} is invalid."
                 )
-        # Now go through and make sure all data is valid
+
         for activity in self.activities:
             for data in activity.data:
                 if not data.validate():
                     raise ValueError(
-                        "Cannot write to disk, data {:} from activity {:} is invalid.".format(
-                            data.name, activity.name
-                        )
+                        "Cannot write to disk, data "
+                        f"{data.name} from activity {activity.name} is invalid."
                     )
-        # Now create the file
-        if isinstance(h5_file, str):
-            if clobber:
-                h5_file = h5.File(h5_file, "w")
-            else:
-                h5_file = h5.File(h5_file, "x")
-        return self.realize_to_hdf5(
-            h5_file,
-            strategy="auto",
-            overwrite=False,
-        )
+
+        file_path = os.fspath(file_path)
+        self._assert_safe_write_target(file_path, clobber)
+
+        mode = "w" if clobber else "x"
+        with h5.File(file_path, mode) as target:
+            self.realize_to_hdf5(
+                target,
+                strategy="auto",
+                overwrite=False,
+            )
+            target.flush()
+
+        return None
 
     @classmethod
     def load(cls, h5_file, readonly=True):

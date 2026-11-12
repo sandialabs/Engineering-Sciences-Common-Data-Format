@@ -1183,35 +1183,39 @@ classdef escdf < handle
             obj.hdf5_location = HDF5Location.from_hdf5_id(file_id);
         end
 
-        function file_id = write_to_disk(obj,file_path,clobber)
-        % Write the container to an HDF5 file.
+        function write_to_disk(obj, file_path, clobber)
+        % Write a complete ESCDF file and close it before returning.
         %
         % Parameters
         % ----------
-        % file_path : char
+        % file_path : char or string
         %     Output HDF5 file path.
         % clobber : logical, optional
-        %     If true, overwrite an existing file. If false, require that
-        %     the file not already exist.
+        %     If true, replace an existing destination unless that file
+        %     currently backs this object graph.
         %
         % Returns
         % -------
-        % file_id : numeric
-        %     HDF5 file identifier for the written file.
+        % None
+        %     The output file is closed before the method returns.
         %
         % Raises
         % ------
         % error
-        %     Raised if any metadata or activity dataset fails validation
-        %     before writing.
+        %     Raised for invalid datasets, unsafe clobber, or incomplete
+        %     realization.
         %
         % Notes
         % -----
-        % All contained datasets are validated before any HDF5 content is
-        % written.
+        % This is a terminal write for HDF5-backed properties realized into
+        % the output. Existing ESCDF handles retain their identity, but
+        % reads through those properties subsequently report a closed
+        % HDF5 dataset ID. Reload the file to continue using its data.
             if nargin < 3
                 clobber = false;
             end
+            file_path = char(string(file_path));
+
             % First go through and make sure all datasets are valid.
             for i = 1:length(obj.metadata)
                 md = obj.metadata(i);
@@ -1233,12 +1237,44 @@ classdef escdf < handle
                     end
                 end
             end
+
+            obj.assert_safe_write_target(file_path, clobber);
+
             if clobber
-                file_id = H5F.create(file_path,'H5F_ACC_TRUNC','H5P_DEFAULT','H5P_DEFAULT');
+                file_id = H5F.create( ...
+                    file_path, 'H5F_ACC_TRUNC', ...
+                    'H5P_DEFAULT', 'H5P_DEFAULT');
             else
-                file_id = H5F.create(file_path,'H5F_ACC_EXCL','H5P_DEFAULT','H5P_DEFAULT');
+                file_id = H5F.create( ...
+                    file_path, 'H5F_ACC_EXCL', ...
+                    'H5P_DEFAULT', 'H5P_DEFAULT');
             end
-            file_id = obj.realize_to_hdf5(file_id,'memory',false);
+
+            % This object owns the target file ID. The cleanup object
+            % closes it on normal exit or if any later step raises.
+            file_cleanup = onCleanup(@() H5F.close(file_id)); %#ok<NASGU>
+            target = HDF5Location(file_path, '/');
+
+            try
+                obj.realize_to_hdf5(file_id, 'memory', false);
+
+                % Validate target ownership before closing any dataset ID.
+                obj.close_target_property_ids(target, true);
+
+                H5F.flush(file_id, 'H5F_SCOPE_GLOBAL');
+            catch ME
+                % Realization may have opened some target dataset IDs before
+                % failing. Close only IDs backed by this target; never
+                % close external source IDs. Preserve the original error.
+                try
+                    obj.close_target_property_ids(target, false);
+                catch
+                end
+                rethrow(ME)
+            end
+
+            % file_cleanup closes file_id at method exit. Do not return
+            % the ID or close it a second time.
         end
 
         function varargout = subsref(obj, S)
@@ -1305,6 +1341,174 @@ classdef escdf < handle
     end
 
     methods (Access = private)
+
+        function result = get_all_property_objects(obj)
+        % Return property objects in the current logical graph.
+        %
+        % Returns
+        % -------
+        % result : cell array of escdf_property
+        %     Present properties of metadata and activity datasets.
+            result = {};
+
+            datasets = num2cell(obj.metadata);
+            for i = 1:numel(obj.activities)
+                activity_data = obj.activities(i).get_data();
+                datasets = [datasets, num2cell(activity_data)]; %#ok<AGROW>
+            end
+
+            for i = 1:numel(datasets)
+                dataset = datasets{i};
+                property_names = properties(dataset);
+
+                for j = 1:numel(property_names)
+                    name = property_names{j};
+                    if startsWith(name, 'DO_NOT_USE_')
+                        continue
+                    end
+
+                    candidate = dataset.(name);
+                    if isa(candidate, 'escdf_property')
+                        result{end+1} = candidate; %#ok<AGROW>
+                    end
+                end
+            end
+        end
+
+        function assert_safe_write_target(obj, file_path, clobber)
+        % Reject truncation of a file backing the current logical graph.
+        %
+        % Parameters
+        % ----------
+        % file_path : char
+        %     Proposed output path.
+        % clobber : logical
+        %     Whether the output file would be truncated.
+        %
+        % Raises
+        % ------
+        % error
+        %     Raised if the destination is used as HDF5 backing by this
+        %     container or one of its descendants.
+            if ~clobber
+                return
+            end
+
+            target = HDF5Location(file_path, '/');
+            location = obj.get_hdf5_location();
+            if ~isempty(location) && location.same_file_as(target)
+                error('escdf:BackingSourceConflict', ...
+                    'Cannot clobber a file backing this ESCDF container.');
+            end
+
+            for i = 1:numel(obj.metadata)
+                location = obj.metadata(i).get_hdf5_location();
+                if ~isempty(location) && location.same_file_as(target)
+                    error('escdf:BackingSourceConflict', ...
+                        'Cannot clobber a file backing metadata in this ESCDF graph.');
+                end
+            end
+
+            for i = 1:numel(obj.activities)
+                activity = obj.activities(i);
+                location = activity.get_hdf5_location();
+                if ~isempty(location) && location.same_file_as(target)
+                    error('escdf:BackingSourceConflict', ...
+                        'Cannot clobber a file backing an activity in this ESCDF graph.');
+                end
+
+                datasets = activity.get_data();
+                for j = 1:numel(datasets)
+                    location = datasets(j).get_hdf5_location();
+                    if ~isempty(location) && location.same_file_as(target)
+                        error('escdf:BackingSourceConflict', ...
+                            'Cannot clobber a file backing activity data in this ESCDF graph.');
+                    end
+                end
+            end
+
+            property_objects = obj.get_all_property_objects();
+            for i = 1:numel(property_objects)
+                prop = property_objects{i};
+                if prop.isinmemory()
+                    continue
+                end
+
+                % A closed property cannot safely be used as an input to
+                % realization; let its existing guard give a clear error.
+                location = prop.get_hdf5_location();
+                if location.same_file_as(target)
+                    error('escdf:BackingSourceConflict', ...
+                        'Cannot clobber a file backing a property in this ESCDF graph.');
+                end
+            end
+        end
+
+        function close_target_property_ids(obj, target, strict)
+        % Close property dataset IDs belonging to a write target.
+        %
+        % Parameters
+        % ----------
+        % target : HDF5Location
+        %     Root location of the target HDF5 file.
+        % strict : logical
+        %     If true, require every present property to be realized at
+        %     its expected logical path in the target file.
+        %
+        % Notes
+        % -----
+        % Does not close IDs for externally backed source properties.
+            property_objects = obj.get_all_property_objects();
+            to_close = {};
+
+            for i = 1:numel(property_objects)
+                prop = property_objects{i};
+
+                if prop.isinmemory()
+                    if strict
+                        error('escdf:IncompleteRealization', ...
+                            'A property remains in memory after realization.');
+                    end
+                    continue
+                end
+
+                if prop.is_closed()
+                    if strict
+                        error('escdf:ClosedProperty', ...
+                            'A property was already closed before write completion.');
+                    end
+                    continue
+                end
+
+                location = prop.get_hdf5_location();
+                if ~location.same_file_as(target)
+                    if strict
+                        error('escdf:IncompleteRealization', ...
+                            'A property still depends on an external HDF5 file.');
+                    end
+                    continue
+                end
+
+                if strict
+                    logical_path = prop.get_logical_path();
+                    if isempty(logical_path) || ...
+                            ~strcmp(location.object_path, logical_path)
+                        error('escdf:IncompleteRealization', ...
+                            'A property is not at its expected target HDF5 path.');
+                    end
+                end
+
+                to_close{end+1} = prop; %#ok<AGROW>
+            end
+
+            for i = 1:numel(to_close)
+                prop = to_close{i};
+                if ~prop.is_closed()
+                    H5D.close(prop.get_h5d_id());
+                end
+            end
+        end
+
         function names = get_metadata_names(obj)
             names = arrayfun(@(x) x.get_name(),obj.metadata,'UniformOutput',false);
         end

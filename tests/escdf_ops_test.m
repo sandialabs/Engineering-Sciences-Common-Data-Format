@@ -1677,15 +1677,13 @@ classdef escdf_ops_test < matlab.unittest.TestCase
             original.add_data_to_activity( ...
                 'act1', escdf_ops_test.make_minimal_data('data1'));
 
-            source_id = original.write_to_disk(source_path, true);
-            H5F.close(source_id);
+            original.write_to_disk(source_path, true);
 
             edited = escdf.load(source_path, true);
             edited.rename_metadata('meta1', 'meta2');
             edited.rename_activity_data('act1', 'data1', 'data2');
 
-            target_id = edited.write_to_disk(target_path, true);
-            H5F.close(target_id);
+            edited.write_to_disk(target_path, true);
 
             target_info = h5info(target_path);
             target_group_names = {target_info.Groups.Name};
@@ -1719,6 +1717,65 @@ classdef escdf_ops_test < matlab.unittest.TestCase
                 source_data_names, '/activities/act1/data1')));
             testCase.verifyFalse(any(strcmp( ...
                 source_data_names, '/activities/act1/data2')));
+        end
+
+        function test_write_to_disk_closes_target_and_preserves_wrapper_identity(testCase)
+        % Verify that a completed write closes target HDF5 access IDs
+        % without replacing the existing ESCDF wrapper objects.
+            outfile = fullfile(testCase.temp_folder, 'complete_write.h5');
+
+            f = escdf();
+            f.add_metadata(escdf_ops_test.make_minimal_metadata('meta1'));
+
+            metadata = f.get_metadata('meta1');
+            prop = metadata.test_name;
+            expected_value = prop(:);
+
+            % The public write operation should not return an open file ID.
+            f.write_to_disk(outfile, true);
+
+            % Closing HDF5 resources must not replace logical objects.
+            testCase.verifySameHandle(f.get_metadata('meta1'), metadata);
+            testCase.verifySameHandle(metadata.test_name, prop);
+
+            % The property wrapper remains, but its target dataset ID is
+            % closed following this terminal write.
+            testCase.verifyTrue(prop.is_closed());
+            testCase.verifyError( ...
+                @() prop(:), ...
+                'escdf_property:ClosedHDF5Dataset');
+
+            % The completed output can be accessed independently.
+            stored_value = h5read(outfile, '/meta1/test_name');
+            testCase.verifyEqual(char(stored_value), char(expected_value{1}));
+        end
+
+        function test_write_to_disk_rejects_clobbering_a_backing_source(testCase)
+        % Verify that an unsafe clobber fails before modifying the source
+        % or closing a property still used to read it.
+            source_path = fullfile(testCase.temp_folder, 'source_write.h5');
+
+            original = escdf();
+            original.add_metadata(escdf_ops_test.make_minimal_metadata('meta1'));
+            original.write_to_disk(source_path, true);
+
+            loaded = escdf.load(source_path, true);
+            source_prop = loaded.get_metadata('meta1').test_name;
+            expected_value = source_prop(:);
+
+            testCase.verifyFalse(source_prop.is_closed());
+
+            testCase.verifyError( ...
+                @() loaded.write_to_disk(source_path, true), ...
+                'escdf:BackingSourceConflict');
+
+            % A rejected write must leave existing access and source data
+            % intact.
+            testCase.verifyFalse(source_prop.is_closed());
+            testCase.verifyEqual(source_prop(:), expected_value);
+
+            stored_value = h5read(source_path, '/meta1/test_name');
+            testCase.verifyEqual(char(stored_value), char(expected_value{1}));
         end
 
     end
